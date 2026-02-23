@@ -2,13 +2,6 @@
 
 Proof-of-concept Laravel chat backend with analytics and moderation using [zaeem2396/laravel-nats](https://github.com/zaeem2396/laravel-nats). Demonstrates publish/subscribe, wildcards, request-reply (RPC), NATS queue driver, JetStream streams and durable consumers, delayed jobs, and multiple connections.
 
-## Requirements
-
-- PHP 8.2+ (8.3+ recommended)
-- Composer
-- NATS Server with JetStream (`-js` flag)
-- MySQL 8 or SQLite (for app DB and failed_jobs)
-
 ## Tech stack
 
 - Laravel 12, PHP 8.3+
@@ -112,6 +105,22 @@ Run RPC responder; in code change the response to `notifications_enabled: false`
 - **JetStream**: Stream `chat-stream` captures `chat.room.>`. Durable consumer `analytics-service` used by analytics worker.
 - **Multiple connections**: Default for chat/moderation; `analytics` connection used by analytics worker (`Nats::jetstream('analytics')`).
 - **RPC**: No `Nats::reply()` helper; subscriber on `user.rpc.preferences` reads `getReplyTo()` and publishes response to that subject.
+
+## Logging
+
+- Moderation subscriber logs when it receives a message and when it subscribes.
+- Jobs log on failure via `failed()` (message_id / payload where applicable).
+- Use `LOG_LEVEL=debug` during development to see NATS and queue activity.
+
+## Before pushing (development)
+
+Run tests (PHP pdo_sqlite required), code style, and static analysis before pushing:
+
+```bash
+composer test
+composer format
+# If PHPStan is installed: composer analyse
+```
 
 ## License
 
