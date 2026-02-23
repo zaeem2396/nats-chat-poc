@@ -45,7 +45,7 @@ Proof-of-concept Laravel chat backend with analytics and moderation using [zaeem
    - `docker compose exec app php artisan nats-chat:rpc-responder`
    - `docker compose exec app php artisan nats-chat:analytics-worker`
 
-API base: `http://localhost:8000` (or your app URL). API prefix: `/api`.
+API base: `http://localhost:8000` (or your app URL). API prefix: `/api`. Subject layout is documented in `config/nats_subjects.php`.
 
 ## API endpoints
 
@@ -105,22 +105,6 @@ Run RPC responder; in code change the response to `notifications_enabled: false`
 - **JetStream**: Stream `chat-stream` captures `chat.room.>`. Durable consumer `analytics-service` used by analytics worker.
 - **Multiple connections**: Default for chat/moderation; `analytics` connection used by analytics worker (`Nats::jetstream('analytics')`).
 - **RPC**: No `Nats::reply()` helper; subscriber on `user.rpc.preferences` reads `getReplyTo()` and publishes response to that subject.
-
-## Logging
-
-- Moderation subscriber logs when it receives a message and when it subscribes.
-- Jobs log on failure via `failed()` (message_id / payload where applicable).
-- Use `LOG_LEVEL=debug` during development to see NATS and queue activity.
-
-## Before pushing (development)
-
-Run tests, code style, and static analysis before pushing:
-
-```bash
-composer test
-./vendor/bin/pint
-# If PHPStan is installed: composer analyse or vendor/bin/phpstan analyse
-```
 
 ## License
 
