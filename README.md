@@ -47,6 +47,8 @@ Proof-of-concept Laravel chat backend with analytics and moderation using [zaeem
 
 API base: `http://localhost:8000` (or your app URL). API prefix: `/api`.
 
+Subject layout is also documented in `config/nats_subjects.php`.
+
 ## API endpoints
 
 | Method | Endpoint | Description |
