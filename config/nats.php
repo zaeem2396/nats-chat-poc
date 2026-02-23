@@ -70,7 +70,7 @@ return [
             ],
 
             // Client identification
-            'client_name' => env('NATS_CLIENT_NAME', config('app.name', 'laravel') . '-nats'),
+            'client_name' => env('NATS_CLIENT_NAME', config('app.name', 'laravel').'-nats'),
             'verbose' => (bool) env('NATS_VERBOSE', false),
             'pedantic' => (bool) env('NATS_PEDANTIC', false),
         ],
@@ -86,7 +86,7 @@ return [
             'ping_interval' => (float) env('NATS_PING_INTERVAL', 120.0),
             'max_pings_out' => (int) env('NATS_MAX_PINGS_OUT', 2),
             'tls' => ['enabled' => false],
-            'client_name' => config('app.name', 'laravel') . '-nats-analytics',
+            'client_name' => config('app.name', 'laravel').'-nats-analytics',
             'verbose' => false,
             'pedantic' => false,
         ],

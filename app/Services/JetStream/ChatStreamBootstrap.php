@@ -2,7 +2,6 @@
 
 namespace App\Services\JetStream;
 
-use App\Jobs\ProcessAnalyticsJob;
 use Illuminate\Support\Facades\Log;
 use LaravelNats\Core\JetStream\ConsumerConfig;
 use LaravelNats\Core\JetStream\StreamConfig;

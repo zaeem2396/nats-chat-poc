@@ -31,7 +31,7 @@ class AnalyticsWorkerCommand extends Command
 
         $js = Nats::jetstream($connectionName);
         if (! $js->isAvailable()) {
-            $this->error('JetStream not available on connection: ' . $connectionName);
+            $this->error('JetStream not available on connection: '.$connectionName);
 
             return self::FAILURE;
         }
@@ -56,7 +56,7 @@ class AnalyticsWorkerCommand extends Command
 
                 $js->ack($msg);
             } catch (\Throwable $e) {
-                $this->error('Error: ' . $e->getMessage());
+                $this->error('Error: '.$e->getMessage());
                 \Log::error('Analytics worker error', ['exception' => $e]);
             }
         }

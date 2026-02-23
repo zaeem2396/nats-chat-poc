@@ -12,7 +12,7 @@ class ChatMessagePublisher
 {
     public function publish(int $roomId, array $payload): void
     {
-        $subject = 'chat.room.' . $roomId . '.message';
+        $subject = 'chat.room.'.$roomId.'.message';
         Nats::publish($subject, $payload);
     }
 }

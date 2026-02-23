@@ -26,7 +26,7 @@ class ChatMessageService
             'timestamp' => $timestamp->toIso8601String(),
         ];
 
-        $subject = 'chat.room.' . $room->id . '.message';
+        $subject = 'chat.room.'.$room->id.'.message';
         Nats::publish($subject, $payload);
 
         \Log::info('Chat message published', ['subject' => $subject, 'message_id' => $messageId]);

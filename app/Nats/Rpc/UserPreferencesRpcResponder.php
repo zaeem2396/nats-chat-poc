@@ -2,8 +2,8 @@
 
 namespace App\Nats\Rpc;
 
-use LaravelNats\Laravel\Facades\Nats;
 use LaravelNats\Contracts\Messaging\MessageInterface;
+use LaravelNats\Laravel\Facades\Nats;
 
 /**
  * Responds to user.rpc.preferences requests with notification preferences.
