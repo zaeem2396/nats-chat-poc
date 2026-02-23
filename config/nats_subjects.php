@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 /**
  * NATS subject structure for nats-chat-poc.
+ * See README "Subject structure" table and architecture notes.
  *
  * chat.room.{roomId}.message  - Chat message published when user sends
  * chat.room.{roomId}.deleted  - Reserved
