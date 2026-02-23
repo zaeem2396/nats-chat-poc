@@ -57,15 +57,6 @@ API base: `http://localhost:8000` (or your app URL). API prefix: `/api`.
 | GET | `/api/rooms/{id}/history` | Room message history |
 | GET | `/api/analytics/room/{id}` | Room analytics (message_count) |
 
-### Example requests (curl)
-
-```bash
-curl -s -X POST http://localhost:8000/api/rooms -H "Content-Type: application/json" -d '{"name":"General"}'
-curl -s -X POST http://localhost:8000/api/rooms/1/message -H "Content-Type: application/json" -d '{"user_id":1,"content":"Hello"}'
-curl -s http://localhost:8000/api/rooms/1/history
-curl -s http://localhost:8000/api/analytics/room/1
-```
-
 ## Commands
 
 - `php artisan queue:work nats` – Process NATS queue jobs (moderation, analytics, notifications, delayed)
@@ -114,6 +105,22 @@ Run RPC responder; in code change the response to `notifications_enabled: false`
 - **JetStream**: Stream `chat-stream` captures `chat.room.>`. Durable consumer `analytics-service` used by analytics worker.
 - **Multiple connections**: Default for chat/moderation; `analytics` connection used by analytics worker (`Nats::jetstream('analytics')`).
 - **RPC**: No `Nats::reply()` helper; subscriber on `user.rpc.preferences` reads `getReplyTo()` and publishes response to that subject.
+
+## Logging
+
+- Moderation subscriber logs when it receives a message and when it subscribes.
+- Jobs log on failure via `failed()` (message_id / payload where applicable).
+- Use `LOG_LEVEL=debug` during development to see NATS and queue activity.
+
+## Before pushing (development)
+
+Run tests, code style, and static analysis before pushing:
+
+```bash
+composer test
+./vendor/bin/pint
+# If PHPStan is installed: composer analyse or vendor/bin/phpstan analyse
+```
 
 ## License
 
