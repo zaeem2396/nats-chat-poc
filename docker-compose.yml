@@ -33,6 +33,12 @@ services:
         condition: service_started
     ports:
       - "8000:8000"
+    healthcheck:
+      test: ["CMD", "php", "-r", "$s=@fsockopen('127.0.0.1',8000);if($s){fclose($s);exit(0);}exit(1);"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
     command: php artisan serve --host=0.0.0.0 --port=8000
 
   queue:
