@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "c514d8f7b9fc5970bdd94287905ef584",
+    "content-hash": "398cfc00e36873bd92d8df3b1b358986",
     "packages": [
         {
             "name": "brick/math",
@@ -6007,6 +6007,88 @@
                 }
             ],
             "time": "2024-11-21T01:49:47+00:00"
+        },
+        {
+            "name": "zaeem2396/laravel-nats",
+            "version": "dev-main",
+            "dist": {
+                "type": "path",
+                "url": "../laravel-nats",
+                "reference": "08b8bb970679d7e97cd3c08b0a32b479d5d65e0a"
+            },
+            "require": {
+                "ext-json": "*",
+                "php": "^8.2"
+            },
+            "require-dev": {
+                "friendsofphp/php-cs-fixer": "^3.0",
+                "laravel/framework": "^10.0|^11.0|^12.0",
+                "mockery/mockery": "^1.6",
+                "orchestra/testbench": "^8.0|^9.0|^10.0",
+                "pestphp/pest": "^2.0|^3.0",
+                "pestphp/pest-plugin-laravel": "^2.0|^3.0",
+                "phpstan/phpstan": "^1.10"
+            },
+            "type": "library",
+            "extra": {
+                "laravel": {
+                    "providers": [
+                        "LaravelNats\\Laravel\\Providers\\NatsServiceProvider"
+                    ],
+                    "aliases": {
+                        "Nats": "LaravelNats\\Laravel\\Facades\\Nats"
+                    }
+                }
+            },
+            "autoload": {
+                "psr-4": {
+                    "LaravelNats\\": "src/"
+                }
+            },
+            "autoload-dev": {
+                "psr-4": {
+                    "LaravelNats\\Tests\\": "tests/"
+                }
+            },
+            "scripts": {
+                "test": [
+                    "vendor/bin/pest"
+                ],
+                "test:coverage": [
+                    "vendor/bin/pest --coverage"
+                ],
+                "analyse": [
+                    "vendor/bin/phpstan analyse"
+                ],
+                "format": [
+                    "vendor/bin/php-cs-fixer fix 2>/dev/null"
+                ],
+                "format:check": [
+                    "vendor/bin/php-cs-fixer fix --dry-run --diff 2>/dev/null"
+                ]
+            },
+            "license": [
+                "MIT"
+            ],
+            "authors": [
+                {
+                    "name": "Zaeem",
+                    "homepage": "https://github.com/zaeem2396"
+                }
+            ],
+            "description": "A production-ready, native Laravel NATS integration with Queue driver, JetStream support, and Artisan commands",
+            "keywords": [
+                "jetstream",
+                "laravel",
+                "messaging",
+                "microservices",
+                "nats",
+                "pub-sub",
+                "queue"
+            ],
+            "transport-options": {
+                "relative": true
+            }
         }
     ],
     "packages-dev": [
@@ -8386,7 +8468,9 @@
     ],
     "aliases": [],
     "minimum-stability": "stable",
-    "stability-flags": [],
+    "stability-flags": {
+        "zaeem2396/laravel-nats": 20
+    },
     "prefer-stable": true,
     "prefer-lowest": false,
     "platform": {

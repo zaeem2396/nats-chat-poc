@@ -13,7 +13,7 @@ return [
     |
     */
 
-    'default' => env('QUEUE_CONNECTION', 'database'),
+    'default' => env('QUEUE_CONNECTION', 'nats'),
 
     /*
     |--------------------------------------------------------------------------
@@ -86,6 +86,22 @@ return [
             'connections' => [
                 'database',
                 'deferred',
+            ],
+        ],
+
+        'nats' => [
+            'driver' => 'nats',
+            'host' => env('NATS_HOST', 'localhost'),
+            'port' => (int) env('NATS_PORT', 4222),
+            'queue' => env('NATS_QUEUE', 'default'),
+            'retry_after' => (int) env('NATS_QUEUE_RETRY_AFTER', 60),
+            'prefix' => env('NATS_QUEUE_PREFIX', 'laravel.queue.'),
+            'dead_letter_queue' => env('NATS_QUEUE_DLQ', 'failed'),
+            'delayed' => [
+                'enabled' => (bool) env('NATS_QUEUE_DELAYED_ENABLED', true),
+                'stream' => env('NATS_QUEUE_DELAYED_STREAM', 'laravel_delayed'),
+                'subject_prefix' => env('NATS_QUEUE_DELAYED_SUBJECT_PREFIX', 'laravel.delayed.'),
+                'consumer' => env('NATS_QUEUE_DELAYED_CONSUMER', 'laravel_delayed_worker'),
             ],
         ],
 
