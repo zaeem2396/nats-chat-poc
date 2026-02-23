@@ -50,7 +50,7 @@
             "@php artisan test"
         ],
         "format": [
-            "@vendor/bin/pint"
+            "./vendor/bin/pint"
         ],
         "analyse": [
             "@php artisan config:clear --ansi"

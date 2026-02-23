@@ -12,6 +12,9 @@ class MessageApiTest extends TestCase
 
     protected function setUp(): void
     {
+        if (! extension_loaded('pdo_sqlite')) {
+            $this->markTestSkipped('pdo_sqlite extension required.');
+        }
         parent::setUp();
         $this->app['config']->set('queue.default', 'sync');
     }

@@ -10,6 +10,14 @@ class RoomsApiTest extends TestCase
 {
     use RefreshDatabase;
 
+    protected function setUp(): void
+    {
+        if (! extension_loaded('pdo_sqlite')) {
+            $this->markTestSkipped('pdo_sqlite extension required.');
+        }
+        parent::setUp();
+    }
+
     public function test_can_create_room(): void
     {
         $response = $this->postJson('/api/rooms', ['name' => 'General']);
