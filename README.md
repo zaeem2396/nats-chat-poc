@@ -114,7 +114,7 @@ Run RPC responder; in code change the response to `notifications_enabled: false`
 
 ## Before pushing (development)
 
-Run tests (PHP pdo_sqlite required), code style, and static analysis before pushing: `composer test`, `composer format`, and optionally `composer analyse` (if PHPStan is installed).
+Run tests (PHP pdo_sqlite required), code style, and static analysis before pushing: `composer test`, `composer format`, and optionally `composer analyse`. Fix any failures before pushing.
 
 ## License
 
