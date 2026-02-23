@@ -1,59 +1,111 @@
-<p align="center"><a href="https://laravel.com" target="_blank"><img src="https://raw.githubusercontent.com/laravel/art/master/logo-lockup/5%20SVG/2%20CMYK/1%20Full%20Color/laravel-logolockup-cmyk-red.svg" width="400" alt="Laravel Logo"></a></p>
+# nats-chat-poc
 
-<p align="center">
-<a href="https://github.com/laravel/framework/actions"><img src="https://github.com/laravel/framework/workflows/tests/badge.svg" alt="Build Status"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/dt/laravel/framework" alt="Total Downloads"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/v/laravel/framework" alt="Latest Stable Version"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/l/laravel/framework" alt="License"></a>
-</p>
+Proof-of-concept Laravel chat backend with analytics and moderation using [zaeem2396/laravel-nats](https://github.com/zaeem2396/laravel-nats). Demonstrates publish/subscribe, wildcards, request-reply (RPC), NATS queue driver, JetStream streams and durable consumers, delayed jobs, and multiple connections.
 
-## About Laravel
+## Tech stack
 
-Laravel is a web application framework with expressive, elegant syntax. We believe development must be an enjoyable and creative experience to be truly fulfilling. Laravel takes the pain out of development by easing common tasks used in many web projects, such as:
+- Laravel 12, PHP 8.3+
+- zaeem2396/laravel-nats
+- NATS Server with JetStream
+- MySQL or SQLite
 
-- [Simple, fast routing engine](https://laravel.com/docs/routing).
-- [Powerful dependency injection container](https://laravel.com/docs/container).
-- Multiple back-ends for [session](https://laravel.com/docs/session) and [cache](https://laravel.com/docs/cache) storage.
-- Expressive, intuitive [database ORM](https://laravel.com/docs/eloquent).
-- Database agnostic [schema migrations](https://laravel.com/docs/migrations).
-- [Robust background job processing](https://laravel.com/docs/queues).
-- [Real-time event broadcasting](https://laravel.com/docs/broadcasting).
+## Subject structure
 
-Laravel is accessible, powerful, and provides tools required for large, robust applications.
+| Subject | Purpose |
+|--------|---------|
+| `chat.room.{roomId}.message` | Chat message published when user sends |
+| `chat.room.{roomId}.deleted` | (Reserved) |
+| `chat.room.*.message` | Moderation subscriber (single-level wildcard) |
+| `chat.room.>` | JetStream stream + analytics (multi-level wildcard) |
+| `user.rpc.preferences` | RPC: get user notification preferences |
+| `notifications.email` | (Reserved) |
 
-## Learning Laravel
+## Setup
 
-Laravel has the most extensive and thorough [documentation](https://laravel.com/docs) and video tutorial library of all modern web application frameworks, making it a breeze to get started with the framework. You can also check out [Laravel Learn](https://laravel.com/learn), where you will be guided through building a modern Laravel application.
+### Local (no Docker)
 
-If you don't feel like reading, [Laracasts](https://laracasts.com) can help. Laracasts contains thousands of video tutorials on a range of topics including Laravel, modern PHP, unit testing, and JavaScript. Boost your skills by digging into our comprehensive video library.
+1. Install NATS with JetStream: `nats-server -js -m 8222`
+2. Clone and install: `composer install` (use path repo for laravel-nats if needed)
+3. Copy `.env.example` to `.env`, set `QUEUE_CONNECTION=nats`, `NATS_HOST=127.0.0.1`, `NATS_QUEUE_DELAYED_ENABLED=true`
+4. Create DB (e.g. SQLite): `touch database/database.sqlite`
+5. Migrate: `php artisan migrate`
+6. Start queue worker: `php artisan queue:work nats`
+7. (Optional) Start moderation subscriber: `php artisan nats-chat:moderation`
+8. (Optional) Start RPC responder: `php artisan nats-chat:rpc-responder`
+9. (Optional) Start analytics worker: `php artisan nats-chat:analytics-worker`
+10. Serve: `php artisan serve`
 
-## Laravel Sponsors
+### Docker
 
-We would like to extend our thanks to the following sponsors for funding Laravel development. If you are interested in becoming a sponsor, please visit the [Laravel Partners program](https://partners.laravel.com).
+1. Ensure `vendor` exists (run `composer install` on host if using path repo for laravel-nats).
+2. `docker compose up -d`
+3. `docker compose exec app php artisan migrate --force`
+4. Queue worker runs in `queue` container. For moderation/RPC/analytics workers, run in separate terminals:
+   - `docker compose exec app php artisan nats-chat:moderation`
+   - `docker compose exec app php artisan nats-chat:rpc-responder`
+   - `docker compose exec app php artisan nats-chat:analytics-worker`
 
-### Premium Partners
+API base: `http://localhost:8000` (or your app URL). API prefix: `/api`.
 
-- **[Vehikl](https://vehikl.com)**
-- **[Tighten Co.](https://tighten.co)**
-- **[Kirschbaum Development Group](https://kirschbaumdevelopment.com)**
-- **[64 Robots](https://64robots.com)**
-- **[Curotec](https://www.curotec.com/services/technologies/laravel)**
-- **[DevSquad](https://devsquad.com/hire-laravel-developers)**
-- **[Redberry](https://redberry.international/laravel-development)**
-- **[Active Logic](https://activelogic.com)**
+## API endpoints
 
-## Contributing
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/api/rooms` | Create room `{ "name": "General" }` |
+| POST | `/api/rooms/{id}/message` | Send message `{ "user_id": 1, "content": "Hello" }` |
+| POST | `/api/rooms/{id}/schedule` | Schedule message (delayed job) `{ "user_id": 1, "content": "Later", "delay_minutes": 1 }` |
+| GET | `/api/rooms/{id}/history` | Room message history |
+| GET | `/api/analytics/room/{id}` | Room analytics (message_count) |
 
-Thank you for considering contributing to the Laravel framework! The contribution guide can be found in the [Laravel documentation](https://laravel.com/docs/contributions).
+## Commands
 
-## Code of Conduct
+- `php artisan queue:work nats` – Process NATS queue jobs (moderation, analytics, notifications, delayed)
+- `php artisan nats-chat:moderation` – Subscribe to `chat.room.*.message`, dispatch ModerateMessageJob + SendNotificationJob
+- `php artisan nats-chat:rpc-responder` – Respond to `user.rpc.preferences` with `{ "notifications_enabled": true }`
+- `php artisan nats-chat:analytics-worker` – JetStream durable consumer `analytics-service` on stream `chat-stream`, dispatch ProcessAnalyticsJob
+- `php artisan nats-chat:failed-jobs` – List failed NATS jobs from `failed_jobs` table
 
-In order to ensure that the Laravel community is welcoming to all, please review and abide by the [Code of Conduct](https://laravel.com/docs/contributions#code-of-conduct).
+## Demo scenarios
 
-## Security Vulnerabilities
+### 1. Normal message flow
 
-If you discover a security vulnerability within Laravel, please send an e-mail to Taylor Otwell via [taylor@laravel.com](mailto:taylor@laravel.com). All security vulnerabilities will be promptly addressed.
+1. Create room: `POST /api/rooms` with `{"name":"Demo"}`
+2. Send message: `POST /api/rooms/1/message` with `{"user_id":1,"content":"Hello"}`
+3. Message is published to `chat.room.1.message`, stored in DB
+4. If moderation subscriber is running, it receives (wildcard `chat.room.*.message`), dispatches ModerateMessageJob and SendNotificationJob
+5. Queue worker processes jobs; SendNotificationJob calls RPC `user.rpc.preferences` if RPC responder is running
+6. If analytics worker is running (JetStream stream `chat-stream` subject `chat.room.>`), it receives the message, dispatches ProcessAnalyticsJob, acks
+7. `GET /api/analytics/room/1` shows incremented message_count
+
+### 2. Message containing "fail-test"
+
+Send `POST /api/rooms/1/message` with `{"user_id":1,"content":"This is a fail-test message"}`. ModerateMessageJob, ProcessAnalyticsJob, and SendNotificationJob will throw and retry (3 tries, 10s backoff), then land in `failed_jobs`. List with `php artisan nats-chat:failed-jobs`.
+
+### 3. Durable consumer (analytics worker restart)
+
+1. Start analytics worker: `php artisan nats-chat:analytics-worker`
+2. Send a few messages so the worker processes them
+3. Stop the worker (Ctrl+C), send more messages (they stay in JetStream)
+4. Restart the worker; it resumes from last ack and processes the pending messages
+
+### 4. Delayed message
+
+`POST /api/rooms/1/schedule` with `{"user_id":1,"content":"Scheduled in 1 min","delay_minutes":1}`. Message is dispatched via SendChatMessageJob with `->delay(now()->addMinutes(1))`. Requires JetStream delayed queue enabled (`NATS_QUEUE_DELAYED_ENABLED=true`).
+
+### 5. RPC preference disabling
+
+Run RPC responder; in code change the response to `notifications_enabled: false` for a given user. Send a message; SendNotificationJob will call RPC and skip sending the notification.
+
+## Architecture notes
+
+- **Publish**: ChatMessageService publishes to `chat.room.{roomId}.message` and persists to `messages` table.
+- **Wildcards**: Moderation uses `chat.room.*.message` (one token); JetStream stream uses `chat.room.>` (one or more).
+- **Queue driver**: Jobs (ModerateMessageJob, ProcessAnalyticsJob, SendNotificationJob, SendChatMessageJob) use `QUEUE_CONNECTION=nats` with retries and backoff.
+- **Failed jobs**: Stored in `failed_jobs`; list with `nats-chat:failed-jobs`.
+- **JetStream**: Stream `chat-stream` captures `chat.room.>`. Durable consumer `analytics-service` used by analytics worker.
+- **Multiple connections**: Default for chat/moderation; `analytics` connection used by analytics worker (`Nats::jetstream('analytics')`).
+- **RPC**: No `Nats::reply()` helper; subscriber on `user.rpc.preferences` reads `getReplyTo()` and publishes response to that subject.
 
 ## License
 
-The Laravel framework is open-sourced software licensed under the [MIT license](https://opensource.org/licenses/MIT).
+MIT.
