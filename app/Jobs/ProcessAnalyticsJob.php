@@ -40,12 +40,19 @@ class ProcessAnalyticsJob implements ShouldQueue
             return;
         }
 
-        $analytic = Analytic::firstOrCreate(
+        Analytic::query()->updateOrInsert(
             ['room_id' => $roomId],
-            ['message_count' => 0]
+            ['message_count' => DB::raw('message_count + 1'), 'updated_at' => now()]
         );
-        $analytic->increment('message_count');
 
         Log::info('Analytics incremented', ['room_id' => $roomId]);
+    }
+
+    public function failed(?\Throwable $exception = null): void
+    {
+        Log::error('ProcessAnalyticsJob failed', [
+            'room_id' => $this->payload['room_id'] ?? null,
+            'exception' => $exception?->getMessage(),
+        ]);
     }
 }

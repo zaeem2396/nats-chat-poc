@@ -47,4 +47,12 @@ class SendNotificationJob implements ShouldQueue
         Log::info('Notification sent (email)', ['user_id' => $this->userId, 'subject' => 'notifications.email']);
         // In a real app: Mail::to(...)->send(...);
     }
+
+    public function failed(?\Throwable $exception = null): void
+    {
+        Log::error('SendNotificationJob failed', [
+            'user_id' => $this->userId,
+            'exception' => $exception?->getMessage(),
+        ]);
+    }
 }
