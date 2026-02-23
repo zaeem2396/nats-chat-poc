@@ -11,7 +11,7 @@ class ListFailedNatsJobsCommand extends Command
                             {--connection=nats : Filter by queue connection}
                             {--limit=50 : Max rows}';
 
-    protected $description = 'List failed NATS queue jobs from failed_jobs table';
+    protected $description = 'List failed NATS queue jobs from failed_jobs table (filter by --connection=nats)';
 
     public function handle(): int
     {
