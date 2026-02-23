@@ -14,7 +14,7 @@ use LaravelNats\Laravel\Facades\Nats;
  */
 class ModerationSubscriber
 {
-    private const SUBJECT = 'chat.room.*.message';
+    private const SUBJECT = 'chat.room.*.message'; // config('nats_subjects.chat.room_message_wildcard')
 
     public function run(): void
     {
