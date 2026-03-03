@@ -10,6 +10,13 @@ use Illuminate\Http\Request;
 
 class RoomController extends Controller
 {
+    public function index(): JsonResponse
+    {
+        $rooms = Room::orderBy('created_at', 'desc')->get();
+
+        return response()->json($rooms);
+    }
+
     public function store(Request $request): JsonResponse
     {
         $validated = $request->validate(['name' => 'required|string|max:255']);
