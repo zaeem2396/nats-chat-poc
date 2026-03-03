@@ -52,11 +52,24 @@ class RoomController extends Controller
 
         $delayMinutes = $validated['delay_minutes'] ?? 1;
 
-        SendChatMessageJob::dispatch(
-            $room->id,
-            (int) $validated['user_id'],
-            $validated['content']
-        )->delay(now()->addMinutes($delayMinutes));
+        try {
+            SendChatMessageJob::dispatch(
+                $room->id,
+                (int) $validated['user_id'],
+                $validated['content']
+            )->delay(now()->addMinutes($delayMinutes));
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::error('Schedule message failed', [
+                'room_id' => $room->id,
+                'exception' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+            ]);
+
+            return response()->json([
+                'message' => 'Failed to schedule message. Ensure NATS is running with JetStream (-js) and the app can connect.',
+                'error' => $e->getMessage(),
+            ], 503);
+        }
 
         return response()->json([
             'message' => 'Message scheduled',
