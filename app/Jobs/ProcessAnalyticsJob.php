@@ -4,6 +4,7 @@ namespace App\Jobs;
 
 use App\Models\Analytic;
 use App\Models\Room;
+use App\Services\MetricsService;
 use App\Support\NatsStructuredLog;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
@@ -24,12 +25,19 @@ class ProcessAnalyticsJob implements ShouldQueue
         public array $payload
     ) {}
 
-    public function handle(): void
+    public function handle(MetricsService $metrics): void
     {
         $start = microtime(true);
         $roomId = $this->payload['room_id'] ?? null;
 
         try {
+            $messageId = $this->payload['message_id'] ?? null;
+            if ($messageId && \Illuminate\Support\Facades\Cache::has('processed_analytics:' . $messageId)) {
+                return; // idempotency
+            }
+            if ($this->attempts() > 1) {
+                $metrics->incrementRetries();
+            }
             $content = $this->payload['content'] ?? '';
             if (str_contains($content, 'fail-test')) {
                 Log::warning('ProcessAnalyticsJob: failing intentionally (fail-test)', ['payload' => $this->payload]);
@@ -52,7 +60,13 @@ class ProcessAnalyticsJob implements ShouldQueue
                 ['message_count' => DB::raw('message_count + 1'), 'updated_at' => now()]
             );
 
-            NatsStructuredLog::withDuration('analytics.job.processed', 'ok', (microtime(true) - $start) * 1000, [
+            $durationMs = (microtime(true) - $start) * 1000;
+            $metrics->incrementProcessed();
+            $metrics->recordProcessingTime($durationMs);
+            if ($messageId) {
+                \Illuminate\Support\Facades\Cache::put('processed_analytics:' . $messageId, true, 86400);
+            }
+            NatsStructuredLog::withDuration('analytics.job.processed', 'ok', $durationMs, [
                 'room_id' => $roomId,
             ]);
         } catch (\Throwable $e) {
@@ -67,6 +81,7 @@ class ProcessAnalyticsJob implements ShouldQueue
 
     public function failed(?\Throwable $exception = null): void
     {
+        app(MetricsService::class)->incrementFailed();
         NatsStructuredLog::error('analytics.job.final_failure', 'failed', $exception ?? new \RuntimeException('Unknown'), [
             'room_id' => $this->payload['room_id'] ?? null,
         ]);

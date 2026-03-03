@@ -2,6 +2,7 @@
 
 namespace App\Jobs;
 
+use App\Services\MetricsService;
 use App\Support\NatsStructuredLog;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
@@ -24,12 +25,15 @@ class SendNotificationJob implements ShouldQueue
         public array $payload
     ) {}
 
-    public function handle(): void
+    public function handle(MetricsService $metrics): void
     {
         $start = microtime(true);
         $roomId = $this->payload['room_id'] ?? null;
 
         try {
+            if ($this->attempts() > 1) {
+                $metrics->incrementRetries();
+            }
             $content = $this->payload['content'] ?? '';
             if (str_contains($content, 'fail-test')) {
                 Log::warning('SendNotificationJob: failing intentionally (fail-test)', ['payload' => $this->payload]);
@@ -47,7 +51,10 @@ class SendNotificationJob implements ShouldQueue
                 Log::warning('RPC preferences failed, skipping notification', ['error' => $e->getMessage()]);
             }
 
-            NatsStructuredLog::withDuration('notification.sent', 'ok', (microtime(true) - $start) * 1000, [
+            $durationMs = (microtime(true) - $start) * 1000;
+            $metrics->incrementProcessed();
+            $metrics->recordProcessingTime($durationMs);
+            NatsStructuredLog::withDuration('notification.sent', 'ok', $durationMs, [
                 'user_id' => $this->userId,
                 'room_id' => $roomId,
             ]);
@@ -64,6 +71,7 @@ class SendNotificationJob implements ShouldQueue
 
     public function failed(?\Throwable $exception = null): void
     {
+        app(MetricsService::class)->incrementFailed();
         NatsStructuredLog::error('notification.job.final_failure', 'failed', $exception ?? new \RuntimeException('Unknown'), [
             'user_id' => $this->userId,
         ]);
