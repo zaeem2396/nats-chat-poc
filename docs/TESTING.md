@@ -112,6 +112,7 @@ docker compose exec app php artisan test
 ```
 
 **Coverage:**
+
 - **RoomsApiTest:** list rooms (empty and with rooms), create room (success and name validation), room history (empty, with messages, 404 for missing room).
 - **MessageApiTest:** send message (success, validation for user_id/content, user_id min:1, 404 for missing room), schedule message (success, validation for user_id/content and delay_minutes range, 404 for missing room).
 - **AnalyticsApiTest:** get analytics for room (without/with analytic record, 404 for missing room).
