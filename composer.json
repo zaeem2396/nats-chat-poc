@@ -89,11 +89,5 @@
         }
     },
     "minimum-stability": "stable",
-    "prefer-stable": true,
-    "repositories": {
-        "laravel-nats": {
-            "type": "path",
-            "url": "../laravel-nats"
-        }
-    }
+    "prefer-stable": true
 }
