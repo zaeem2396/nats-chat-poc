@@ -4,6 +4,7 @@ use App\Http\Controllers\AnalyticsController;
 use App\Http\Controllers\RoomController;
 use Illuminate\Support\Facades\Route;
 
+Route::get('/rooms', [RoomController::class, 'index']);
 Route::post('/rooms', [RoomController::class, 'store']);
 Route::post('/rooms/{room}/message', [RoomController::class, 'message']);
 Route::post('/rooms/{room}/schedule', [RoomController::class, 'schedule']);
