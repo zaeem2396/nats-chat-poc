@@ -1,6 +1,15 @@
 # NATS Chat PoC
 
-Proof-of-concept Laravel chat backend demonstrating the **[zaeem2396/laravel-nats](https://github.com/zaeem2396/laravel-nats)** package. Suitable for proposals, demos, and technical evaluation.
+Production-style Laravel chat backend demonstrating the **[zaeem2396/laravel-nats](https://github.com/zaeem2396/laravel-nats)** package: Pub/Sub, RPC, JetStream, queue driver, DLQ, metrics, and multi-worker scaling.
+
+## Architecture Overview
+
+- **API** receives send/schedule → persists message and publishes to `chat.room.{id}.message`.
+- **Moderation** (`nats:consume` wildcard) and **JetStream** stream both receive messages; moderation dispatches queue jobs (moderation, notification); analytics worker pulls from stream and dispatches analytics job.
+- **Queue workers** (`nats:work`) process jobs; failed jobs go to **DLQ** (`chat.dlq`) and can be stored in `failed_messages` via `nats-chat:dlq-store`.
+- **Metrics** (processed/failed/retries/avg time) are exposed at `GET /api/metrics`.
+
+See **[docs/DOCUMENTATION.md](docs/DOCUMENTATION.md)** for a full diagram and data flow.
 
 ## What This PoC Demonstrates
 
@@ -12,6 +21,39 @@ Proof-of-concept Laravel chat backend demonstrating the **[zaeem2396/laravel-nat
 - **Delayed jobs** — Scheduled messages via JetStream delayed queue
 - **Multiple NATS connections** — Default + analytics connection
 - **Package Artisan commands** — `nats:work`, `nats:consume` with handler classes
+- **DLQ** — Failed jobs published to `chat.dlq`, stored in DB, `GET /api/dlq`
+- **Metrics** — `GET /api/metrics` (processed, failed, retries, avg processing time)
+- **Event versioning** — Payload `{ version, type, data }`; idempotency via `message_id`
+- **Multi-worker** — Two queue workers in Docker (same queue = load balanced)
+
+## Feature Mapping (laravel-nats vs this project)
+
+| laravel-nats feature | This project |
+|----------------------|--------------|
+| `Nats::publish()` | ChatMessageService publishes to `chat.room.{id}.message` |
+| `nats:consume` + handler | ModerationMessageHandler, UserPreferencesRpcHandler |
+| `nats:work` (queue) | queue + queue-2 containers; ModerateMessageJob, SendNotificationJob, ProcessAnalyticsJob |
+| JetStream stream/consumer | ChatStreamBootstrap (chat-stream), DlqStreamBootstrap (dlq), analytics-worker |
+| Delayed jobs (JetStream) | Schedule message endpoint |
+| Request/reply | SendNotificationJob → `user.rpc.preferences` → UserPreferencesRpcHandler |
+| Dead letter queue | `chat.dlq` → failed_messages table, `GET /api/dlq` |
+
+## Failure Scenarios
+
+- **Retries:** Jobs use `tries=3` and `backoff`; JetStream consumer has `ack_wait` and `max_deliver` (config: `NATS_JETSTREAM_ACK_WAIT`, `NATS_JETSTREAM_MAX_DELIVER`).
+- **DLQ:** After max retries, job is published to `chat.dlq`. Run `nats-chat:dlq-store` to persist to `failed_messages`; list via `GET /api/dlq`.
+- **Worker crash:** Queue jobs are re-delivered by NATS when a worker dies; JetStream consumer resumes from last ack on restart.
+
+## Scaling
+
+- **Multiple workers:** Docker runs two `nats:work` containers (queue, queue-2) on the same queue name `default`. NATS distributes messages between them (queue group).
+- **Add more:** Add more services in `docker-compose.yml` with the same `command: php artisan nats:work --queue=default`.
+
+## Why NATS (vs Redis / Kafka)
+
+- **NATS:** Lightweight, at-most-once or JetStream for persistence, low latency, easy to run. Good for event-driven apps and queues at moderate scale.
+- **Redis (queues):** Simple, in-memory; no built-in replay or durable log.
+- **Kafka:** Durable log, high throughput; heavier ops and resource use. Prefer NATS when you want persistence and ordering without Kafka’s complexity.
 
 ## Tech Stack
 
@@ -51,13 +93,15 @@ docker compose exec app php artisan migrate --force
 Containers started:
 
 - **app** — Laravel on port 8090
-- **queue** — `php artisan nats:work`
+- **queue**, **queue-2** — `php artisan nats:work` (same queue = load balanced)
 - **moderation** — `nats:consume "chat.room.*.message"` with `ModerationMessageHandler`
 - **rpc-responder** — `nats:consume "user.rpc.preferences"` with `UserPreferencesRpcHandler`
 - **analytics** — JetStream durable consumer (analytics worker)
 - **mysql** — MySQL on host port 3307
 - **phpmyadmin** — http://localhost:8091 (server: `mysql`, user: `nats_chat`, password: `secret`)
 - **nats** — NATS + JetStream on 4223 / 8224
+
+**How to run and usage:** See **[docs/RUNNING.md](docs/RUNNING.md)** for step-by-step run, API usage, and all Artisan commands.
 
 ### Try It
 
@@ -71,22 +115,28 @@ From the UI you can: create rooms, send messages, schedule delayed messages, vie
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
+| GET | `/api/rooms` | List rooms |
 | POST | `/api/rooms` | Create room `{ "name": "General" }` |
 | POST | `/api/rooms/{id}/message` | Send message `{ "user_id": 1, "content": "Hello" }` |
 | POST | `/api/rooms/{id}/schedule` | Schedule message (delayed job) `{ "user_id": 1, "content": "Later", "delay_minutes": 1 }` |
 | GET | `/api/rooms/{id}/history` | Room message history |
 | GET | `/api/analytics/room/{id}` | Room analytics (message_count) |
+| GET | `/api/dlq` | List failed messages (DLQ) `?per_page=20` |
+| GET | `/api/metrics` | Metrics (messages_processed, messages_failed, retries_count, avg_processing_time_ms) |
 
 ## Artisan Commands
 
 ### Package (laravel-nats)
 
-- `php artisan nats:work` — NATS queue worker (moderation, analytics, notifications, delayed jobs)
-- `php artisan nats:consume "{subject}" --handler=ClassName` — Subject consumer with handler (used for moderation and RPC in this PoC)
+- `php artisan nats:work` — NATS queue worker
+- `php artisan nats:consume "{subject}" --handler=ClassName` — Subject consumer with handler
 
 ### This project
 
 - `php artisan nats-chat:analytics-worker` — JetStream durable consumer for analytics
+- `php artisan nats-chat:dlq-bootstrap` — Create DLQ stream (run once)
+- `php artisan nats-chat:dlq-store` — Consume DLQ → failed_messages table
+- `php artisan nats-chat:load-test [--count=1000] [--use-http]` — Load test
 - `php artisan nats-chat:failed-jobs` — List failed NATS jobs
 
 ## Subject Structure
@@ -96,7 +146,18 @@ From the UI you can: create rooms, send messages, schedule delayed messages, vie
 | `chat.room.{roomId}.message` | Chat message (published on send) |
 | `chat.room.*.message` | Moderation consumer (wildcard) |
 | `chat.room.>` | JetStream stream + analytics |
+| `chat.dlq` | Dead letter queue (failed jobs) |
 | `user.rpc.preferences` | RPC: user notification preferences |
+
+## Demo Guide (Step-by-Step)
+
+1. **Start stack:** `docker compose up -d` then `docker compose exec app php artisan migrate --force`
+2. **Web UI:** Open http://localhost:8090 → create room → send message → Refresh (see history)
+3. **Schedule:** Send a message with delay 1 min → wait → Refresh
+4. **Metrics:** `curl -s http://localhost:8090/api/metrics`
+5. **Fail-test:** In UI click "Send fail-test message" → `docker compose exec app php artisan nats-chat:failed-jobs`
+6. **Load test:** `docker compose exec app php artisan nats-chat:load-test --count=200`
+7. **NATS monitor:** http://localhost:8224 (connections, throughput)
 
 ## Testing
 
@@ -106,7 +167,9 @@ From the UI you can: create rooms, send messages, schedule delayed messages, vie
 
 ## Documentation
 
-- **[docs/DOCUMENTATION.md](docs/DOCUMENTATION.md)** — Full documentation: architecture, API reference, demo scenarios, local setup, troubleshooting, and package feature mapping.
+- **[docs/RUNNING.md](docs/RUNNING.md)** — How to run (Docker + local), API usage, all Artisan commands.
+- **[docs/DOCUMENTATION.md](docs/DOCUMENTATION.md)** — Architecture, API reference, NATS monitoring, event versioning, config profiles, troubleshooting.
+- **[docs/TESTING.md](docs/TESTING.md)** — Manual and automated testing.
 
 ## Local Setup (No Docker)
 
