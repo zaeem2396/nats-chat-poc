@@ -50,8 +50,9 @@ class AnalyticsWorkerCommand extends Command
                     continue;
                 }
 
-                $payload = json_decode($msg->getPayload(), true);
-                if (is_array($payload)) {
+                $raw = json_decode($msg->getPayload(), true);
+                if (is_array($raw)) {
+                    $payload = \App\Support\EventPayload::unwrap($raw);
                     $roomId = $payload['room_id'] ?? null;
                     ProcessAnalyticsJob::dispatch($payload);
                     NatsStructuredLog::event('analytics.worker.dispatched', 'ok', [

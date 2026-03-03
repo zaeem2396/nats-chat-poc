@@ -4,6 +4,7 @@ namespace App\Handlers;
 
 use App\Jobs\ModerateMessageJob;
 use App\Jobs\SendNotificationJob;
+use App\Support\EventPayload;
 use App\Support\NatsStructuredLog;
 use LaravelNats\Contracts\Messaging\MessageHandlerInterface;
 use LaravelNats\Contracts\Messaging\MessageInterface;
@@ -18,7 +19,7 @@ class ModerationMessageHandler implements MessageHandlerInterface
     public function handle(MessageInterface $message): void
     {
         $start = microtime(true);
-        $payload = $message->getDecodedPayload();
+        $payload = EventPayload::unwrap($message->getDecodedPayload());
         $roomId = $payload['room_id'] ?? null;
         $messageId = $payload['message_id'] ?? null;
 
