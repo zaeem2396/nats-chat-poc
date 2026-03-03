@@ -96,7 +96,7 @@ return [
             'queue' => env('NATS_QUEUE', 'default'),
             'retry_after' => (int) env('NATS_QUEUE_RETRY_AFTER', 60),
             'prefix' => env('NATS_QUEUE_PREFIX', 'laravel.queue.'),
-            'dead_letter_queue' => env('NATS_QUEUE_DLQ', 'failed'),
+            'dead_letter_queue' => env('NATS_QUEUE_DLQ', 'chat.dlq'),
             'delayed' => [
                 'enabled' => (bool) env('NATS_QUEUE_DELAYED_ENABLED', true),
                 'stream' => env('NATS_QUEUE_DELAYED_STREAM', 'laravel_delayed'),

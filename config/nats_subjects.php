@@ -26,4 +26,5 @@ return [
     'notifications' => [
         'email' => 'notifications.email',
     ],
+    'dlq' => 'chat.dlq',
 ];

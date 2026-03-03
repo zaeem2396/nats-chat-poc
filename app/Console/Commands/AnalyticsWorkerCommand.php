@@ -4,8 +4,10 @@ namespace App\Console\Commands;
 
 use App\Jobs\ProcessAnalyticsJob;
 use App\Services\JetStream\ChatStreamBootstrap;
+use App\Support\NatsStructuredLog;
 use Illuminate\Console\Command;
 use LaravelNats\Laravel\Facades\Nats;
+use Throwable;
 
 /**
  * Long-running worker: fetches from JetStream durable consumer "analytics-service",
@@ -50,14 +52,22 @@ class AnalyticsWorkerCommand extends Command
 
                 $payload = json_decode($msg->getPayload(), true);
                 if (is_array($payload)) {
+                    $roomId = $payload['room_id'] ?? null;
                     ProcessAnalyticsJob::dispatch($payload);
+                    NatsStructuredLog::event('analytics.worker.dispatched', 'ok', [
+                        'room_id' => $roomId,
+                        'stream' => $streamName,
+                    ]);
                     $this->info('Dispatched ProcessAnalyticsJob for message');
                 }
 
                 $js->ack($msg);
-            } catch (\Throwable $e) {
+            } catch (Throwable $e) {
                 $this->error('Error: '.$e->getMessage());
-                \Log::error('Analytics worker error', ['exception' => $e]);
+                NatsStructuredLog::error('analytics.worker.error', 'error', $e, [
+                    'stream' => $streamName,
+                    'consumer' => $consumerName,
+                ]);
             }
         }
     }

@@ -139,6 +139,10 @@ return [
     'jetstream' => [
         'domain' => env('NATS_JETSTREAM_DOMAIN'),
         'timeout' => (float) env('NATS_JETSTREAM_TIMEOUT', 5.0),
+        'consumer' => [
+            'ack_wait' => (float) env('NATS_JETSTREAM_ACK_WAIT', 30.0),
+            'max_deliver' => (int) env('NATS_JETSTREAM_MAX_DELIVER', 3),
+        ],
     ],
 
     /*

@@ -2,11 +2,13 @@
 
 namespace App\Jobs;
 
+use App\Support\NatsStructuredLog;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Support\Facades\Log;
 use LaravelNats\Laravel\Facades\Nats;
+use Throwable;
 
 class SendNotificationJob implements ShouldQueue
 {
@@ -24,35 +26,46 @@ class SendNotificationJob implements ShouldQueue
 
     public function handle(): void
     {
-        $content = $this->payload['content'] ?? '';
-        if (str_contains($content, 'fail-test')) {
-            Log::warning('SendNotificationJob: failing intentionally (fail-test)', ['payload' => $this->payload]);
-            throw new \RuntimeException('Intentional fail for demo: message contains fail-test');
-        }
+        $start = microtime(true);
+        $roomId = $this->payload['room_id'] ?? null;
 
-        // RPC: check user preferences before sending
         try {
-            $response = Nats::request('user.rpc.preferences', ['user_id' => $this->userId], timeout: 3.0);
-            $prefs = $response->getDecodedPayload();
-            Log::info('RPC response received', ['preferences' => $prefs]);
-            if (isset($prefs['notifications_enabled']) && $prefs['notifications_enabled'] !== true) {
-                Log::info('Notifications disabled for user, skipping', ['user_id' => $this->userId]);
-
-                return;
+            $content = $this->payload['content'] ?? '';
+            if (str_contains($content, 'fail-test')) {
+                Log::warning('SendNotificationJob: failing intentionally (fail-test)', ['payload' => $this->payload]);
+                throw new \RuntimeException('Intentional fail for demo: message contains fail-test');
             }
-        } catch (\Throwable $e) {
-            Log::warning('RPC preferences failed, skipping notification', ['error' => $e->getMessage()]);
-        }
 
-        Log::info('Notification sent (email)', ['user_id' => $this->userId, 'subject' => 'notifications.email']);
-        // In a real app: Mail::to(...)->send(...);
+            try {
+                $response = Nats::request('user.rpc.preferences', ['user_id' => $this->userId], timeout: 3.0);
+                $prefs = $response->getDecodedPayload();
+                if (isset($prefs['notifications_enabled']) && $prefs['notifications_enabled'] !== true) {
+                    NatsStructuredLog::event('notification.skipped', 'disabled', ['user_id' => $this->userId]);
+                    return;
+                }
+            } catch (Throwable $e) {
+                Log::warning('RPC preferences failed, skipping notification', ['error' => $e->getMessage()]);
+            }
+
+            NatsStructuredLog::withDuration('notification.sent', 'ok', (microtime(true) - $start) * 1000, [
+                'user_id' => $this->userId,
+                'room_id' => $roomId,
+            ]);
+        } catch (Throwable $e) {
+            NatsStructuredLog::error('notification.job.failed', 'error', $e, [
+                'user_id' => $this->userId,
+                'room_id' => $roomId,
+                'attempt' => $this->attempts(),
+                'duration_ms' => round((microtime(true) - $start) * 1000, 2),
+            ]);
+            throw $e;
+        }
     }
 
     public function failed(?\Throwable $exception = null): void
     {
-        Log::error('SendNotificationJob failed', [
+        NatsStructuredLog::error('notification.job.final_failure', 'failed', $exception ?? new \RuntimeException('Unknown'), [
             'user_id' => $this->userId,
-            'exception' => $exception?->getMessage(),
         ]);
     }
 }
