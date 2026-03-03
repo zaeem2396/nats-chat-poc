@@ -1,59 +1,126 @@
-<p align="center"><a href="https://laravel.com" target="_blank"><img src="https://raw.githubusercontent.com/laravel/art/master/logo-lockup/5%20SVG/2%20CMYK/1%20Full%20Color/laravel-logolockup-cmyk-red.svg" width="400" alt="Laravel Logo"></a></p>
+# NATS Chat PoC
 
-<p align="center">
-<a href="https://github.com/laravel/framework/actions"><img src="https://github.com/laravel/framework/workflows/tests/badge.svg" alt="Build Status"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/dt/laravel/framework" alt="Total Downloads"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/v/laravel/framework" alt="Latest Stable Version"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/l/laravel/framework" alt="License"></a>
-</p>
+Proof-of-concept Laravel chat backend demonstrating the **[zaeem2396/laravel-nats](https://github.com/zaeem2396/laravel-nats)** package. Suitable for proposals, demos, and technical evaluation.
 
-## About Laravel
+## What This PoC Demonstrates
 
-Laravel is a web application framework with expressive, elegant syntax. We believe development must be an enjoyable and creative experience to be truly fulfilling. Laravel takes the pain out of development by easing common tasks used in many web projects, such as:
+- **Publish/Subscribe** — Chat messages published to NATS subjects; subscribers for moderation and analytics
+- **Wildcards** — Single-level (`chat.room.*.message`) and multi-level (`chat.room.>`) subscriptions
+- **Request/Reply (RPC)** — User preferences via `user.rpc.preferences`
+- **NATS as Laravel queue driver** — Jobs processed with `nats:work` (retries, backoff, failed jobs)
+- **JetStream** — Streams, durable consumers, pull consumption, acknowledgements
+- **Delayed jobs** — Scheduled messages via JetStream delayed queue
+- **Multiple NATS connections** — Default + analytics connection
+- **Package Artisan commands** — `nats:work`, `nats:consume` with handler classes
 
-- [Simple, fast routing engine](https://laravel.com/docs/routing).
-- [Powerful dependency injection container](https://laravel.com/docs/container).
-- Multiple back-ends for [session](https://laravel.com/docs/session) and [cache](https://laravel.com/docs/cache) storage.
-- Expressive, intuitive [database ORM](https://laravel.com/docs/eloquent).
-- Database agnostic [schema migrations](https://laravel.com/docs/migrations).
-- [Robust background job processing](https://laravel.com/docs/queues).
-- [Real-time event broadcasting](https://laravel.com/docs/broadcasting).
+## Tech Stack
 
-Laravel is accessible, powerful, and provides tools required for large, robust applications.
+- **Laravel 12**, PHP 8.3+
+- **zaeem2396/laravel-nats**
+- **NATS Server** with JetStream
+- **MySQL 8** (Docker) or SQLite (local)
+- **phpMyAdmin** (Docker) for database access
 
-## Learning Laravel
+## Quick Start (Docker)
 
-Laravel has the most extensive and thorough [documentation](https://laravel.com/docs) and video tutorial library of all modern web application frameworks, making it a breeze to get started with the framework. You can also check out [Laravel Learn](https://laravel.com/learn), where you will be guided through building a modern Laravel application.
+Ports are set to avoid clashes with other projects:
 
-If you don't feel like reading, [Laracasts](https://laracasts.com) can help. Laracasts contains thousands of video tutorials on a range of topics including Laravel, modern PHP, unit testing, and JavaScript. Boost your skills by digging into our comprehensive video library.
+| Service     | URL / Port              |
+|------------|--------------------------|
+| Laravel API| http://localhost:**8090** |
+| phpMyAdmin | http://localhost:**8091** |
+| MySQL      | localhost:**3307**       |
+| NATS       | **4223** (client), **8224** (monitor) |
 
-## Laravel Sponsors
+```bash
+# Install dependencies (laravel-nats is pulled from Packagist / https://github.com/zaeem2396/laravel-nats)
+composer install
 
-We would like to extend our thanks to the following sponsors for funding Laravel development. If you are interested in becoming a sponsor, please visit the [Laravel Partners program](https://partners.laravel.com).
+# Use MySQL in Docker: copy Docker env so the app uses MySQL (not SQLite from .env)
+cp .env.docker .env
+# Or merge DB_* and NATS_* from .env.docker into your existing .env
 
-### Premium Partners
+# Start all services
+docker compose up -d
 
-- **[Vehikl](https://vehikl.com)**
-- **[Tighten Co.](https://tighten.co)**
-- **[Kirschbaum Development Group](https://kirschbaumdevelopment.com)**
-- **[64 Robots](https://64robots.com)**
-- **[Curotec](https://www.curotec.com/services/technologies/laravel)**
-- **[DevSquad](https://devsquad.com/hire-laravel-developers)**
-- **[Redberry](https://redberry.international/laravel-development)**
-- **[Active Logic](https://activelogic.com)**
+# Run migrations and clear config cache
+docker compose exec app php artisan config:clear
+docker compose exec app php artisan migrate --force
+```
 
-## Contributing
+Containers started:
 
-Thank you for considering contributing to the Laravel framework! The contribution guide can be found in the [Laravel documentation](https://laravel.com/docs/contributions).
+- **app** — Laravel on port 8090
+- **queue** — `php artisan nats:work`
+- **moderation** — `nats:consume "chat.room.*.message"` with `ModerationMessageHandler`
+- **rpc-responder** — `nats:consume "user.rpc.preferences"` with `UserPreferencesRpcHandler`
+- **analytics** — JetStream durable consumer (analytics worker)
+- **mysql** — MySQL on host port 3307
+- **phpmyadmin** — http://localhost:8091 (server: `mysql`, user: `nats_chat`, password: `secret`)
+- **nats** — NATS + JetStream on 4223 / 8224
 
-## Code of Conduct
+### Try It
 
-In order to ensure that the Laravel community is welcoming to all, please review and abide by the [Code of Conduct](https://laravel.com/docs/contributions#code-of-conduct).
+Open the **web UI** in your browser:
 
-## Security Vulnerabilities
+**http://localhost:8090**
 
-If you discover a security vulnerability within Laravel, please send an e-mail to Taylor Otwell via [taylor@laravel.com](mailto:taylor@laravel.com). All security vulnerabilities will be promptly addressed.
+From the UI you can: create rooms, send messages, schedule delayed messages, view history and analytics, and trigger the fail-test message (for failed jobs demo). No curl needed.
+
+## API Endpoints
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/api/rooms` | Create room `{ "name": "General" }` |
+| POST | `/api/rooms/{id}/message` | Send message `{ "user_id": 1, "content": "Hello" }` |
+| POST | `/api/rooms/{id}/schedule` | Schedule message (delayed job) `{ "user_id": 1, "content": "Later", "delay_minutes": 1 }` |
+| GET | `/api/rooms/{id}/history` | Room message history |
+| GET | `/api/analytics/room/{id}` | Room analytics (message_count) |
+
+## Artisan Commands
+
+### Package (laravel-nats)
+
+- `php artisan nats:work` — NATS queue worker (moderation, analytics, notifications, delayed jobs)
+- `php artisan nats:consume "{subject}" --handler=ClassName` — Subject consumer with handler (used for moderation and RPC in this PoC)
+
+### This project
+
+- `php artisan nats-chat:analytics-worker` — JetStream durable consumer for analytics
+- `php artisan nats-chat:failed-jobs` — List failed NATS jobs
+
+## Subject Structure
+
+| Subject | Purpose |
+|--------|---------|
+| `chat.room.{roomId}.message` | Chat message (published on send) |
+| `chat.room.*.message` | Moderation consumer (wildcard) |
+| `chat.room.>` | JetStream stream + analytics |
+| `user.rpc.preferences` | RPC: user notification preferences |
+
+## Testing
+
+- **Manual (API):** See **[docs/TESTING.md](docs/TESTING.md)** for curl examples and demo scenarios (happy path, failed jobs, delayed messages).
+- **Quick script:** `./test-manual.sh` (or `BASE_URL=http://localhost:8090 ./test-manual.sh`).
+- **Automated:** `composer test` or `docker compose exec app php artisan test` (requires PHP with pdo_sqlite).
+
+## Documentation
+
+- **[docs/DOCUMENTATION.md](docs/DOCUMENTATION.md)** — Full documentation: architecture, API reference, demo scenarios, local setup, troubleshooting, and package feature mapping.
+
+## Local Setup (No Docker)
+
+1. NATS with JetStream: `nats-server -js -m 8222`
+2. `composer install`, copy `.env.example` to `.env`, set `QUEUE_CONNECTION=nats`, `NATS_HOST=127.0.0.1`, `NATS_QUEUE_DELAYED_ENABLED=true`
+3. Database: `touch database/database.sqlite` (or MySQL), then `php artisan migrate`
+4. Run in separate terminals: `php artisan serve`, `php artisan nats:work`, `php artisan nats:consume "chat.room.*.message" --handler=App\Handlers\ModerationMessageHandler`, `php artisan nats:consume "user.rpc.preferences" --handler=App\Handlers\UserPreferencesRpcHandler`, `php artisan nats-chat:analytics-worker`
+
+## Development
+
+- Tests: `composer test`
+- Code style: `composer format`
+- Static analysis: `composer analyse`
 
 ## License
 
-The Laravel framework is open-sourced software licensed under the [MIT license](https://opensource.org/licenses/MIT).
+MIT.
