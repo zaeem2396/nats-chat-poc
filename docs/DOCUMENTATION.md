@@ -188,11 +188,40 @@ GET /api/analytics/room/{id}
 
 **Response:** `{ "room_id": 1, "message_count": 42 }`
 
+### 5.6 Dead Letter Queue (DLQ)
+
+```http
+GET /api/dlq?per_page=20
+```
+
+**Response:** Paginated list of failed messages (from `failed_messages` table): `subject`, `payload`, `error_reason`, `original_queue`, `failed_at`.
+
+### 5.7 Metrics
+
+```http
+GET /api/metrics
+```
+
+**Response:** `{ "messages_processed": 0, "messages_failed": 0, "retries_count": 0, "avg_processing_time_ms": 0 }` (cache-backed; resets when cache expires).
+
 ---
 
-## 6. Artisan Commands Used
+## 6. NATS Monitoring
 
-### 6.1 Package commands (laravel-nats)
+With the monitor enabled (`-m 8222` in Docker, exposed as **8224** on the host):
+
+- **URL:** http://localhost:8224
+- **Connections:** Number of clients connected (app, queue workers, moderation, rpc, analytics).
+- **Subscriptions:** Per-connection subscriptions (e.g. `chat.room.*.message`, `user.rpc.preferences`).
+- **Throughput:** Messages in/out per second.
+
+Use this to verify workers are connected and to observe traffic when sending messages or running the load test.
+
+---
+
+## 7. Artisan Commands Used
+
+### 7.1 Package commands (laravel-nats)
 
 | Command | Purpose |
 |--------|---------|
@@ -200,14 +229,17 @@ GET /api/analytics/room/{id}
 | `php artisan nats:consume "chat.room.*.message" --handler=App\Handlers\ModerationMessageHandler` | Subscribe to chat messages (wildcard), dispatch moderation and notification jobs. |
 | `php artisan nats:consume "user.rpc.preferences" --handler=App\Handlers\UserPreferencesRpcHandler` | RPC responder: reply to preference requests. |
 
-### 6.2 Project commands
+### 7.2 Project commands
 
 | Command | Purpose |
 |--------|---------|
 | `php artisan nats-chat:analytics-worker` | JetStream durable consumer `analytics-service` on stream `chat-stream`; dispatches ProcessAnalyticsJob. |
 | `php artisan nats-chat:failed-jobs [--connection=nats]` | List failed NATS jobs from `failed_jobs` table. |
+| `php artisan nats-chat:dlq-bootstrap` | Create JetStream stream/consumer for `chat.dlq` (run once). |
+| `php artisan nats-chat:dlq-store` | Consume from DLQ stream, store in `failed_messages` table. |
+| `php artisan nats-chat:load-test [--count=100] [--use-http] [--base-url=...]` | Send messages (in-process or via HTTP), report success/failure and throughput. |
 
-### 6.3 Optional: JetStream management (package)
+### 7.3 Optional: JetStream management (package)
 
 ```bash
 php artisan nats:stream:list
@@ -218,9 +250,31 @@ php artisan nats:jetstream:status
 
 ---
 
-## 7. Demo Scenarios
+## 8. Event Versioning and Idempotency
 
-### 7.1 End-to-end message flow
+- **Payload shape:** Messages use `{ "version": "v1", "type": "chat.message.created", "data": { ... } }`. Handlers unwrap via `EventPayload::unwrap()` so jobs receive flat `data`.
+- **Idempotency:** Jobs use `message_id` and cache (`processed_message:{id}`, `processed_analytics:{id}`) to skip duplicate processing.
+
+---
+
+## 9. Ordering Strategy (Per-Room)
+
+- **Approach:** One subject per room (`chat.room.{roomId}.message`) and NATS Core queue subscriptions (same queue name) deliver each message to one consumer. Within a single consumer, messages for the same room are processed in order.
+- **Tradeoff:** Multiple queue workers (same queue) share load but order across workers is not guaranteed per room. For strict per-room ordering, use a single consumer per room or a JetStream consumer with a filter per room.
+
+---
+
+## 10. Config Profiles
+
+- **local:** `APP_ENV=local`, no NATS auth, SQLite or local MySQL.
+- **docker:** Use `.env.docker` or merge: `DB_HOST=mysql`, `NATS_HOST=nats`, `NATS_QUEUE_DELAYED_ENABLED=true`.
+- **production:** Set `NATS_USER`/`NATS_PASSWORD` or `NATS_TOKEN`, `APP_DEBUG=false`, consider TLS in `config/nats.php`.
+
+---
+
+## 11. Demo Scenarios
+
+### 11.1 End-to-end message flow
 
 1. Create room: `POST /api/rooms` with `{"name":"Demo"}`.
 2. Send message: `POST /api/rooms/1/message` with `{"user_id":1,"content":"Hello"}`.
@@ -230,7 +284,7 @@ php artisan nats:jetstream:status
 6. Analytics worker consumes from JetStream, dispatches ProcessAnalyticsJob, acks.
 7. Check analytics: `GET /api/analytics/room/1` (message_count incremented).
 
-### 7.2 Failed jobs and retries
+### 11.2 Failed jobs and retries
 
 Send: `POST /api/rooms/1/message` with `{"user_id":1,"content":"This is a fail-test message"}`.
 
@@ -240,14 +294,14 @@ Jobs throw on purpose, retry (3 tries, backoff), then land in `failed_jobs`. Lis
 docker compose exec app php artisan nats-chat:failed-jobs
 ```
 
-### 7.3 Durable consumer (analytics)
+### 11.3 Durable consumer (analytics)
 
 1. Ensure analytics container is running (or run manually: `php artisan nats-chat:analytics-worker`).
 2. Send a few messages so the worker processes them.
 3. Stop the worker, send more messages (they remain in JetStream).
 4. Restart the worker; it resumes from last ack and processes pending messages.
 
-### 7.4 Delayed message
+### 11.4 Delayed message
 
 ```bash
 curl -s -X POST http://localhost:8090/api/rooms/1/schedule \
@@ -257,13 +311,13 @@ curl -s -X POST http://localhost:8090/api/rooms/1/schedule \
 
 Message appears in the room after the delay (JetStream delayed queue).
 
-### 7.5 RPC preference
+### 11.5 RPC preference
 
 With the RPC responder running, SendNotificationJob calls `user.rpc.preferences`. To simulate “notifications off”, change the response in `App\Handlers\UserPreferencesRpcHandler` to `notifications_enabled: false` for a given user; the job will skip sending the notification.
 
 ---
 
-## 8. Local Development (No Docker)
+## 12. Local Development (No Docker)
 
 1. Start NATS with JetStream: `nats-server -js -m 8222` (or use ports 4223/8224 if needed).
 2. `composer install`; copy `.env.example` to `.env`; set `NATS_HOST=127.0.0.1`, `NATS_PORT=4222` (or 4223), `QUEUE_CONNECTION=nats`, `NATS_QUEUE_DELAYED_ENABLED=true`.
@@ -278,7 +332,7 @@ With the RPC responder running, SendNotificationJob calls `user.rpc.preferences`
 
 ---
 
-## 9. Configuration Summary
+## 13. Configuration Summary
 
 - **Queue:** `config/queue.php` — connection `nats`, optional `dead_letter_queue`, JetStream `delayed` (stream, subject_prefix, consumer).
 - **NATS:** `config/nats.php` — connections `default` and `analytics`; JetStream and queue options.
@@ -294,7 +348,7 @@ Environment variables used (see `.env.example`):
 
 ---
 
-## 10. Package Features Demonstrated
+## 14. Package Features Demonstrated
 
 | Feature | How |
 |--------|-----|
@@ -310,7 +364,7 @@ Environment variables used (see `.env.example`):
 
 ---
 
-## 11. Troubleshooting
+## 15. Troubleshooting
 
 - **Port in use:** Change host ports in `docker-compose.yml` (e.g. 8090→8092, 3307→3308, 8091→8092, 4223→4225, 8224→8226).
 - **Queue jobs not running:** Ensure `queue` container is up (`nats:work`). Check NATS and app logs.
@@ -320,6 +374,6 @@ Environment variables used (see `.env.example`):
 
 ---
 
-## 12. License
+## 16. License
 
 MIT.

@@ -117,6 +117,7 @@ docker compose exec app php artisan test
 - **MessageApiTest:** send message (success, validation for user_id/content, user_id min:1, 404 for missing room), schedule message (success, validation for user_id/content and delay_minutes range, 404 for missing room).
 - **AnalyticsApiTest:** get analytics for room (without/with analytic record, 404 for missing room).
 - **DlqApiTest:** GET /api/dlq (empty list and with failed messages).
+- **MetricsApiTest:** GET /api/metrics returns structure (messages_processed, messages_failed, retries_count, avg_processing_time_ms).
 
 ---
 
