@@ -116,16 +116,29 @@ docker compose exec app php artisan test
 - **RoomsApiTest:** list rooms (empty and with rooms), create room (success and name validation), room history (empty, with messages, 404 for missing room).
 - **MessageApiTest:** send message (success, validation for user_id/content, user_id min:1, 404 for missing room), schedule message (success, validation for user_id/content and delay_minutes range, 404 for missing room).
 - **AnalyticsApiTest:** get analytics for room (without/with analytic record, 404 for missing room).
+- **DlqApiTest:** GET /api/dlq (empty list and with failed messages).
 
 ---
 
-## 4. Optional: curl / script
+## 4. Dead Letter Queue (DLQ)
+
+Failed queue jobs (after max retries) are published to **chat.dlq** and can be stored in the database.
+
+1. **Bootstrap DLQ stream** (once): `php artisan nats-chat:dlq-bootstrap`
+2. **Run DLQ store worker**: `php artisan nats-chat:dlq-store` (consumes from JetStream and writes to `failed_messages` table).
+3. **List failed messages**: `GET /api/dlq` (paginated).
+
+JetStream consumer retry is configured via `NATS_JETSTREAM_ACK_WAIT` and `NATS_JETSTREAM_MAX_DELIVER` (see `config/nats.php`).
+
+---
+
+## 5. Optional: curl / script
 
 For CI or headless runs you can use the API with curl or the `./test-manual.sh` script in the project root.
 
 ---
 
-## 5. Useful commands
+## 6. Useful commands
 
 | Check | Command |
 |-------|---------|
