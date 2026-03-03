@@ -1,4 +1,5 @@
-# nats-chat-poc: Laravel app + NATS (JetStream) + MySQL + queue worker
+# nats-chat-poc: Laravel app + NATS (JetStream) + MySQL + phpMyAdmin + workers
+# Ports chosen to avoid clashes with other projects: app 8090, MySQL 3307, NATS 4223/8224, phpMyAdmin 8091
 # Run: docker compose up -d && docker compose exec app php artisan migrate --force
 
 services:
@@ -15,6 +16,7 @@ services:
     environment:
       - APP_ENV=local
       - APP_DEBUG=true
+      - APP_URL=http://localhost:8090
       - DB_CONNECTION=mysql
       - DB_HOST=mysql
       - DB_PORT=3306
@@ -32,7 +34,7 @@ services:
       nats:
         condition: service_started
     ports:
-      - "8000:8000"
+      - "8090:8000"
     healthcheck:
       test: ["CMD", "php", "-r", "$s=@fsockopen('127.0.0.1',8000);if($s){fclose($s);exit(0);}exit(1);"]
       interval: 10s
@@ -64,7 +66,74 @@ services:
     depends_on:
       - app
       - nats
-    command: php artisan queue:work nats --tries=3 --sleep=1
+    command: php artisan nats:work --tries=3 --sleep=1
+
+  moderation:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: nats-chat-moderation
+    restart: unless-stopped
+    working_dir: /var/www
+    volumes:
+      - .:/var/www
+    environment:
+      - APP_ENV=local
+      - DB_CONNECTION=mysql
+      - DB_HOST=mysql
+      - DB_DATABASE=nats_chat
+      - DB_USERNAME=nats_chat
+      - DB_PASSWORD=secret
+      - NATS_HOST=nats
+      - NATS_PORT=4222
+      - QUEUE_CONNECTION=nats
+    depends_on:
+      - app
+      - nats
+    command: php artisan nats:consume "chat.room.*.message" --handler=App\\Handlers\\ModerationMessageHandler
+
+  rpc-responder:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: nats-chat-rpc
+    restart: unless-stopped
+    working_dir: /var/www
+    volumes:
+      - .:/var/www
+    environment:
+      - APP_ENV=local
+      - NATS_HOST=nats
+      - NATS_PORT=4222
+    depends_on:
+      - app
+      - nats
+    command: php artisan nats:consume "user.rpc.preferences" --handler=App\\Handlers\\UserPreferencesRpcHandler
+
+  analytics:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: nats-chat-analytics
+    restart: unless-stopped
+    working_dir: /var/www
+    volumes:
+      - .:/var/www
+    environment:
+      - APP_ENV=local
+      - DB_CONNECTION=mysql
+      - DB_HOST=mysql
+      - DB_DATABASE=nats_chat
+      - DB_USERNAME=nats_chat
+      - DB_PASSWORD=secret
+      - NATS_HOST=nats
+      - NATS_ANALYTICS_HOST=nats
+      - NATS_PORT=4222
+      - QUEUE_CONNECTION=nats
+    depends_on:
+      - app
+      - nats
+    command: php artisan nats-chat:analytics-worker --connection=analytics
 
   mysql:
     image: mysql:8.0
@@ -78,12 +147,28 @@ services:
     volumes:
       - mysql_data:/var/lib/mysql
     ports:
-      - "3306:3306"
+      - "3307:3306"
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
       interval: 5s
       timeout: 5s
       retries: 10
+
+  phpmyadmin:
+    image: phpmyadmin:latest
+    container_name: nats-chat-phpmyadmin
+    restart: unless-stopped
+    environment:
+      PMA_HOST: mysql
+      PMA_PORT: 3306
+      PMA_USER: nats_chat
+      PMA_PASSWORD: secret
+      UPLOAD_LIMIT: 64M
+    ports:
+      - "8091:80"
+    depends_on:
+      mysql:
+        condition: service_healthy
 
   nats:
     image: nats:2.10-alpine
@@ -91,8 +176,8 @@ services:
     restart: unless-stopped
     command: ["-js", "-m", "8222"]
     ports:
-      - "4222:4222"
-      - "8222:8222"
+      - "4223:4222"
+      - "8224:8222"
 
 volumes:
   mysql_data:
