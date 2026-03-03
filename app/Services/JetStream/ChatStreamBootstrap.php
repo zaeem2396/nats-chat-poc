@@ -46,9 +46,15 @@ class ChatStreamBootstrap
             $consumerConfig = (new ConsumerConfig(self::CONSUMER_NAME))
                 ->withFilterSubject('chat.room.>')
                 ->withDeliverPolicy(ConsumerConfig::DELIVER_ALL)
-                ->withAckPolicy(ConsumerConfig::ACK_EXPLICIT);
+                ->withAckPolicy(ConsumerConfig::ACK_EXPLICIT)
+                ->withAckWait(config('nats.jetstream.consumer.ack_wait', 30.0))
+                ->withMaxDeliver(config('nats.jetstream.consumer.max_deliver', 3));
             $js->createConsumer(self::STREAM_NAME, self::CONSUMER_NAME, $consumerConfig);
-            Log::info('JetStream consumer created', ['consumer' => self::CONSUMER_NAME]);
+            Log::info('JetStream consumer created', [
+                'consumer' => self::CONSUMER_NAME,
+                'ack_wait' => $consumerConfig->getAckWait(),
+                'max_deliver' => $consumerConfig->getMaxDeliver(),
+            ]);
         }
     }
 }
