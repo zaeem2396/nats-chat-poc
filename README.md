@@ -1,53 +1,73 @@
-# nats-chat-poc
+# NATS Chat PoC
 
-Proof-of-concept Laravel chat backend with analytics and moderation using [zaeem2396/laravel-nats](https://github.com/zaeem2396/laravel-nats). Demonstrates publish/subscribe, wildcards, request-reply (RPC), NATS queue driver, JetStream streams and durable consumers, delayed jobs, and multiple connections.
+Proof-of-concept Laravel chat backend demonstrating the **[zaeem2396/laravel-nats](https://github.com/zaeem2396/laravel-nats)** package. Suitable for proposals, demos, and technical evaluation.
 
-## Tech stack
+## What This PoC Demonstrates
 
-- Laravel 12, PHP 8.3+
-- zaeem2396/laravel-nats
-- NATS Server with JetStream
-- MySQL or SQLite
+- **Publish/Subscribe** — Chat messages published to NATS subjects; subscribers for moderation and analytics
+- **Wildcards** — Single-level (`chat.room.*.message`) and multi-level (`chat.room.>`) subscriptions
+- **Request/Reply (RPC)** — User preferences via `user.rpc.preferences`
+- **NATS as Laravel queue driver** — Jobs processed with `nats:work` (retries, backoff, failed jobs)
+- **JetStream** — Streams, durable consumers, pull consumption, acknowledgements
+- **Delayed jobs** — Scheduled messages via JetStream delayed queue
+- **Multiple NATS connections** — Default + analytics connection
+- **Package Artisan commands** — `nats:work`, `nats:consume` with handler classes
 
-## Subject structure
+## Tech Stack
 
-| Subject | Purpose |
-|--------|---------|
-| `chat.room.{roomId}.message` | Chat message published when user sends |
-| `chat.room.{roomId}.deleted` | (Reserved) |
-| `chat.room.*.message` | Moderation subscriber (single-level wildcard) |
-| `chat.room.>` | JetStream stream + analytics (multi-level wildcard) |
-| `user.rpc.preferences` | RPC: get user notification preferences |
-| `notifications.email` | (Reserved) |
+- **Laravel 12**, PHP 8.3+
+- **zaeem2396/laravel-nats**
+- **NATS Server** with JetStream
+- **MySQL 8** (Docker) or SQLite (local)
+- **phpMyAdmin** (Docker) for database access
 
-## Setup
+## Quick Start (Docker)
 
-### Local (no Docker)
+Ports are set to avoid clashes with other projects:
 
-1. Install NATS with JetStream: `nats-server -js -m 8222`
-2. Clone and install: `composer install` (use path repo for laravel-nats if needed)
-3. Copy `.env.example` to `.env`, set `QUEUE_CONNECTION=nats`, `NATS_HOST=127.0.0.1`, `NATS_QUEUE_DELAYED_ENABLED=true`
-4. Create DB (e.g. SQLite): `touch database/database.sqlite`
-5. Migrate: `php artisan migrate`
-6. Start queue worker: `php artisan queue:work nats`
-7. (Optional) Start moderation subscriber: `php artisan nats-chat:moderation`
-8. (Optional) Start RPC responder: `php artisan nats-chat:rpc-responder`
-9. (Optional) Start analytics worker: `php artisan nats-chat:analytics-worker`
-10. Serve: `php artisan serve`
+| Service     | URL / Port              |
+|------------|--------------------------|
+| Laravel API| http://localhost:**8090** |
+| phpMyAdmin | http://localhost:**8091** |
+| MySQL      | localhost:**3307**       |
+| NATS       | **4223** (client), **8224** (monitor) |
 
-### Docker
+```bash
+# Install dependencies (laravel-nats is pulled from Packagist / https://github.com/zaeem2396/laravel-nats)
+composer install
 
-1. Ensure `vendor` exists (run `composer install` on host if using path repo for laravel-nats).
-2. `docker compose up -d`
-3. `docker compose exec app php artisan migrate --force`
-4. Queue worker runs in `queue` container. For moderation/RPC/analytics workers, run in separate terminals:
-   - `docker compose exec app php artisan nats-chat:moderation`
-   - `docker compose exec app php artisan nats-chat:rpc-responder`
-   - `docker compose exec app php artisan nats-chat:analytics-worker`
+# Use MySQL in Docker: copy Docker env so the app uses MySQL (not SQLite from .env)
+cp .env.docker .env
+# Or merge DB_* and NATS_* from .env.docker into your existing .env
 
-API base: `http://localhost:8000` (or your app URL). API prefix: `/api`.
+# Start all services
+docker compose up -d
 
-## API endpoints
+# Run migrations and clear config cache
+docker compose exec app php artisan config:clear
+docker compose exec app php artisan migrate --force
+```
+
+Containers started:
+
+- **app** — Laravel on port 8090
+- **queue** — `php artisan nats:work`
+- **moderation** — `nats:consume "chat.room.*.message"` with `ModerationMessageHandler`
+- **rpc-responder** — `nats:consume "user.rpc.preferences"` with `UserPreferencesRpcHandler`
+- **analytics** — JetStream durable consumer (analytics worker)
+- **mysql** — MySQL on host port 3307
+- **phpmyadmin** — http://localhost:8091 (server: `mysql`, user: `nats_chat`, password: `secret`)
+- **nats** — NATS + JetStream on 4223 / 8224
+
+### Try It
+
+Open the **web UI** in your browser:
+
+**http://localhost:8090**
+
+From the UI you can: create rooms, send messages, schedule delayed messages, view history and analytics, and trigger the fail-test message (for failed jobs demo). No curl needed.
+
+## API Endpoints
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
@@ -57,64 +77,49 @@ API base: `http://localhost:8000` (or your app URL). API prefix: `/api`.
 | GET | `/api/rooms/{id}/history` | Room message history |
 | GET | `/api/analytics/room/{id}` | Room analytics (message_count) |
 
-## Commands
+## Artisan Commands
 
-- `php artisan queue:work nats` – Process NATS queue jobs (moderation, analytics, notifications, delayed)
-- `php artisan nats-chat:moderation` – Subscribe to `chat.room.*.message`, dispatch ModerateMessageJob + SendNotificationJob
-- `php artisan nats-chat:rpc-responder` – Respond to `user.rpc.preferences` with `{ "notifications_enabled": true }`
-- `php artisan nats-chat:analytics-worker` – JetStream durable consumer `analytics-service` on stream `chat-stream`, dispatch ProcessAnalyticsJob
-- `php artisan nats-chat:failed-jobs` – List failed NATS jobs from `failed_jobs` table
+### Package (laravel-nats)
 
-## Demo scenarios
+- `php artisan nats:work` — NATS queue worker (moderation, analytics, notifications, delayed jobs)
+- `php artisan nats:consume "{subject}" --handler=ClassName` — Subject consumer with handler (used for moderation and RPC in this PoC)
 
-### 1. Normal message flow
+### This project
 
-1. Create room: `POST /api/rooms` with `{"name":"Demo"}`
-2. Send message: `POST /api/rooms/1/message` with `{"user_id":1,"content":"Hello"}`
-3. Message is published to `chat.room.1.message`, stored in DB
-4. If moderation subscriber is running, it receives (wildcard `chat.room.*.message`), dispatches ModerateMessageJob and SendNotificationJob
-5. Queue worker processes jobs; SendNotificationJob calls RPC `user.rpc.preferences` if RPC responder is running
-6. If analytics worker is running (JetStream stream `chat-stream` subject `chat.room.>`), it receives the message, dispatches ProcessAnalyticsJob, acks
-7. `GET /api/analytics/room/1` shows incremented message_count
+- `php artisan nats-chat:analytics-worker` — JetStream durable consumer for analytics
+- `php artisan nats-chat:failed-jobs` — List failed NATS jobs
 
-### 2. Message containing "fail-test"
+## Subject Structure
 
-Send `POST /api/rooms/1/message` with `{"user_id":1,"content":"This is a fail-test message"}`. ModerateMessageJob, ProcessAnalyticsJob, and SendNotificationJob will throw and retry (3 tries, 10s backoff), then land in `failed_jobs`. List with `php artisan nats-chat:failed-jobs`.
+| Subject | Purpose |
+|--------|---------|
+| `chat.room.{roomId}.message` | Chat message (published on send) |
+| `chat.room.*.message` | Moderation consumer (wildcard) |
+| `chat.room.>` | JetStream stream + analytics |
+| `user.rpc.preferences` | RPC: user notification preferences |
 
-### 3. Durable consumer (analytics worker restart)
+## Testing
 
-1. Start analytics worker: `php artisan nats-chat:analytics-worker`
-2. Send a few messages so the worker processes them
-3. Stop the worker (Ctrl+C), send more messages (they stay in JetStream)
-4. Restart the worker; it resumes from last ack and processes the pending messages
+- **Manual (API):** See **[docs/TESTING.md](docs/TESTING.md)** for curl examples and demo scenarios (happy path, failed jobs, delayed messages).
+- **Quick script:** `./test-manual.sh` (or `BASE_URL=http://localhost:8090 ./test-manual.sh`).
+- **Automated:** `composer test` or `docker compose exec app php artisan test` (requires PHP with pdo_sqlite).
 
-### 4. Delayed message
+## Documentation
 
-`POST /api/rooms/1/schedule` with `{"user_id":1,"content":"Scheduled in 1 min","delay_minutes":1}`. Message is dispatched via SendChatMessageJob with `->delay(now()->addMinutes(1))`. Requires JetStream delayed queue enabled (`NATS_QUEUE_DELAYED_ENABLED=true`).
+- **[docs/DOCUMENTATION.md](docs/DOCUMENTATION.md)** — Full documentation: architecture, API reference, demo scenarios, local setup, troubleshooting, and package feature mapping.
 
-### 5. RPC preference disabling
+## Local Setup (No Docker)
 
-Run RPC responder; in code change the response to `notifications_enabled: false` for a given user. Send a message; SendNotificationJob will call RPC and skip sending the notification.
+1. NATS with JetStream: `nats-server -js -m 8222`
+2. `composer install`, copy `.env.example` to `.env`, set `QUEUE_CONNECTION=nats`, `NATS_HOST=127.0.0.1`, `NATS_QUEUE_DELAYED_ENABLED=true`
+3. Database: `touch database/database.sqlite` (or MySQL), then `php artisan migrate`
+4. Run in separate terminals: `php artisan serve`, `php artisan nats:work`, `php artisan nats:consume "chat.room.*.message" --handler=App\Handlers\ModerationMessageHandler`, `php artisan nats:consume "user.rpc.preferences" --handler=App\Handlers\UserPreferencesRpcHandler`, `php artisan nats-chat:analytics-worker`
 
-## Architecture notes
+## Development
 
-- **Publish**: ChatMessageService publishes to `chat.room.{roomId}.message` and persists to `messages` table.
-- **Wildcards**: Moderation uses `chat.room.*.message` (one token); JetStream stream uses `chat.room.>` (one or more).
-- **Queue driver**: Jobs (ModerateMessageJob, ProcessAnalyticsJob, SendNotificationJob, SendChatMessageJob) use `QUEUE_CONNECTION=nats` with retries and backoff.
-- **Failed jobs**: Stored in `failed_jobs`; list with `nats-chat:failed-jobs`.
-- **JetStream**: Stream `chat-stream` captures `chat.room.>`. Durable consumer `analytics-service` used by analytics worker.
-- **Multiple connections**: Default for chat/moderation; `analytics` connection used by analytics worker (`Nats::jetstream('analytics')`).
-- **RPC**: No `Nats::reply()` helper; subscriber on `user.rpc.preferences` reads `getReplyTo()` and publishes response to that subject.
-
-## Logging
-
-- Moderation subscriber logs when it receives a message and when it subscribes.
-- Jobs log on failure via `failed()` (message_id / payload where applicable).
-- Use `LOG_LEVEL=debug` during development to see NATS and queue activity.
-
-## Before pushing (development)
-
-Run tests (PHP pdo_sqlite required), code style, and static analysis before pushing: `composer test`, `composer format`, and optionally `composer analyse`. Fix any failures before pushing.
+- Tests: `composer test`
+- Code style: `composer format`
+- Static analysis: `composer analyse`
 
 ## License
 
