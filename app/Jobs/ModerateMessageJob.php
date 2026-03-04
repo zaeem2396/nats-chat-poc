@@ -26,17 +26,28 @@ class ModerateMessageJob implements ShouldQueue
     public function handle(MetricsService $metrics): void
     {
         $start = microtime(true);
+        $subject = 'queue.default';
         $messageId = $this->payload['message_id'] ?? null;
         $roomId = $this->payload['room_id'] ?? null;
+        $attempt = $this->attempts();
+
+        $metrics->incrementTotalMessages();
+        if ($messageId && \Illuminate\Support\Facades\Cache::has('processed_message:' . $messageId)) {
+            return; // idempotency: already processed
+        }
+        if ($attempt > 1) {
+            $metrics->incrementRetries();
+            NatsStructuredLog::messageProcessed(
+                'moderation.job.retry',
+                $subject,
+                NatsStructuredLog::STATUS_RETRY,
+                $attempt,
+                (microtime(true) - $start) * 1000,
+                null,
+            );
+        }
 
         try {
-            $messageId = $this->payload['message_id'] ?? null;
-            if ($messageId && \Illuminate\Support\Facades\Cache::has('processed_message:' . $messageId)) {
-                return; // idempotency: already processed
-            }
-            if ($this->attempts() > 1) {
-                $metrics->incrementRetries();
-            }
             $content = $this->payload['content'] ?? '';
             if (str_contains($content, 'fail-test')) {
                 Log::warning('ModerateMessageJob: failing intentionally (fail-test)', ['payload' => $this->payload]);
@@ -49,17 +60,24 @@ class ModerateMessageJob implements ShouldQueue
             if ($messageId) {
                 \Illuminate\Support\Facades\Cache::put('processed_message:' . $messageId, true, 86400);
             }
-            NatsStructuredLog::withDuration('moderation.job.processed', 'ok', $durationMs, [
-                'message_id' => $messageId,
-                'room_id' => $roomId,
-            ]);
+            NatsStructuredLog::messageProcessed(
+                'moderation.job.processed',
+                $subject,
+                NatsStructuredLog::STATUS_SUCCESS,
+                $attempt,
+                $durationMs,
+                null,
+            );
         } catch (Throwable $e) {
-            NatsStructuredLog::error('moderation.job.failed', 'error', $e, [
-                'message_id' => $messageId,
-                'room_id' => $roomId,
-                'attempt' => $this->attempts(),
-                'duration_ms' => round((microtime(true) - $start) * 1000, 2),
-            ]);
+            $durationMs = (microtime(true) - $start) * 1000;
+            NatsStructuredLog::messageProcessed(
+                'moderation.job.failed',
+                $subject,
+                NatsStructuredLog::STATUS_FAILED,
+                $attempt,
+                $durationMs,
+                $e->getMessage(),
+            );
             throw $e;
         }
     }
@@ -67,9 +85,13 @@ class ModerateMessageJob implements ShouldQueue
     public function failed(?\Throwable $exception = null): void
     {
         app(MetricsService::class)->incrementFailed();
-        NatsStructuredLog::error('moderation.job.final_failure', 'failed', $exception ?? new \RuntimeException('Unknown'), [
-            'message_id' => $this->payload['message_id'] ?? null,
-            'room_id' => $this->payload['room_id'] ?? null,
-        ]);
+        NatsStructuredLog::messageProcessed(
+            'moderation.job.final_failure',
+            'queue.default',
+            NatsStructuredLog::STATUS_FAILED,
+            $this->attempts(),
+            0,
+            $exception?->getMessage(),
+        );
     }
 }
