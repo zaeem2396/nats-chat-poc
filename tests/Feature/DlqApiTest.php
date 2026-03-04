@@ -33,7 +33,9 @@ class DlqApiTest extends TestCase
         FailedMessage::create([
             'subject' => 'chat.dlq',
             'payload' => ['room_id' => 1, 'content' => 'test', 'failure_message' => 'Something failed'],
+            'error_message' => 'Something failed',
             'error_reason' => 'Something failed',
+            'attempts' => 3,
             'original_queue' => 'default',
             'original_connection' => 'nats',
             'failed_at' => now(),
@@ -43,7 +45,8 @@ class DlqApiTest extends TestCase
 
         $response->assertStatus(200)
             ->assertJsonPath('data.0.subject', 'chat.dlq')
-            ->assertJsonPath('data.0.error_reason', 'Something failed')
+            ->assertJsonPath('data.0.error_message', 'Something failed')
+            ->assertJsonPath('data.0.attempts', 3)
             ->assertJsonPath('data.0.payload.room_id', 1);
     }
 }
