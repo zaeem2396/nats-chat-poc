@@ -13,6 +13,12 @@ class MetricsService
 
     private const TTL_SECONDS = 86400; // 24h
 
+    public function incrementTotalMessages(): void
+    {
+        Cache::add(self::PREFIX . 'total_messages', 0, self::TTL_SECONDS);
+        Cache::increment(self::PREFIX . 'total_messages');
+    }
+
     public function incrementProcessed(): void
     {
         Cache::add(self::PREFIX . 'messages_processed', 0, self::TTL_SECONDS);
@@ -46,10 +52,11 @@ class MetricsService
         $sum = (float) Cache::get(self::PREFIX . 'processing_sum', 0);
         $count = (int) Cache::get(self::PREFIX . 'processing_count', 0);
         return [
-            'messages_processed' => (int) Cache::get(self::PREFIX . 'messages_processed', 0),
-            'messages_failed' => (int) Cache::get(self::PREFIX . 'messages_failed', 0),
-            'retries_count' => (int) Cache::get(self::PREFIX . 'retries_count', 0),
-            'avg_processing_time_ms' => $count > 0 ? round($sum / $count, 2) : 0,
+            'total_messages' => (int) Cache::get(self::PREFIX . 'total_messages', 0),
+            'processed_messages' => (int) Cache::get(self::PREFIX . 'messages_processed', 0),
+            'failed_messages' => (int) Cache::get(self::PREFIX . 'messages_failed', 0),
+            'retries' => (int) Cache::get(self::PREFIX . 'retries_count', 0),
+            'avg_processing_time' => $count > 0 ? round($sum / $count, 2) : 0,
         ];
     }
 }
