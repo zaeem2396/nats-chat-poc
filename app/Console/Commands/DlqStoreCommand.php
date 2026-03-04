@@ -54,10 +54,15 @@ class DlqStoreCommand extends Command
                     continue;
                 }
 
+                $errorMessage = $payload['failure_message'] ?? $payload['failure_exception'] ?? null;
+                $attempts = (int) ($payload['attempts'] ?? 1);
+
                 FailedMessage::create([
                     'subject' => method_exists($msg, 'getSubject') ? $msg->getSubject() : DlqStreamBootstrap::SUBJECT,
                     'payload' => $payload,
-                    'error_reason' => $payload['failure_message'] ?? $payload['failure_exception'] ?? null,
+                    'error_message' => $errorMessage,
+                    'error_reason' => $errorMessage,
+                    'attempts' => $attempts,
                     'original_queue' => $payload['original_queue'] ?? null,
                     'original_connection' => $payload['original_connection'] ?? null,
                     'failed_at' => isset($payload['failed_at'])
