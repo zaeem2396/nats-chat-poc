@@ -15,7 +15,7 @@ class DlqController extends Controller
     {
         $perPage = min((int) $request->get('per_page', 20), 100);
         $items = FailedMessage::query()
-            ->orderByDesc('failed_at')
+            ->orderByDesc('created_at')
             ->paginate($perPage);
 
         return response()->json($items);
