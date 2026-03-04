@@ -66,6 +66,7 @@ This document describes the **NATS Chat Proof of Concept**: a Laravel-based chat
 | `chat.room.{roomId}.deleted`| Reserved for future use |
 | `chat.room.*.message`      | Moderation subscriber (single-level wildcard) |
 | `chat.room.>`              | JetStream stream + analytics (multi-level wildcard) |
+| `chat.dlq`                 | Dead letter queue (failed jobs after max retries) |
 | `user.rpc.preferences`     | RPC: get user notification preferences |
 | `notifications.email`      | Reserved |
 
@@ -194,7 +195,7 @@ GET /api/analytics/room/{id}
 GET /api/dlq?per_page=20
 ```
 
-**Response:** Paginated list of failed messages (from `failed_messages` table): `subject`, `payload`, `error_reason`, `original_queue`, `failed_at`.
+**Response:** Paginated list of failed messages from the `failed_messages` table. Each item includes: `id`, `subject`, `payload` (JSON), `error_message`, `attempts`, `original_queue`, `original_connection`, `failed_at`, `created_at`. When jobs fail after max retries, they are published to `chat.dlq`; the `nats-chat:dlq-store` worker consumes and stores them here.
 
 ### 5.7 Metrics
 
@@ -202,7 +203,7 @@ GET /api/dlq?per_page=20
 GET /api/metrics
 ```
 
-**Response:** `{ "messages_processed": 0, "messages_failed": 0, "retries_count": 0, "avg_processing_time_ms": 0 }` (cache-backed; resets when cache expires).
+**Response:** `{ "total_messages": 0, "processed_messages": 0, "failed_messages": 0, "retries": 0, "avg_processing_time": 0 }` (cache-backed; resets when cache expires). `avg_processing_time` is in milliseconds.
 
 ---
 
@@ -250,10 +251,11 @@ php artisan nats:jetstream:status
 
 ---
 
-## 8. Event Versioning and Idempotency
+## 8. Event Versioning, Idempotency, and Logging
 
-- **Payload shape:** Messages use `{ "version": "v1", "type": "chat.message.created", "data": { ... } }`. Handlers unwrap via `EventPayload::unwrap()` so jobs receive flat `data`.
+- **Event envelope:** Every published message follows `{ "id": "<uuid>", "type": "chat.message.created", "version": "v1", "data": { ... } }`. Handlers unwrap via `EventPayload::unwrap()` so jobs receive flat `data`. The top-level `id` matches `data.message_id`.
 - **Idempotency:** Jobs use `message_id` and cache (`processed_message:{id}`, `processed_analytics:{id}`) to skip duplicate processing.
+- **Structured logging:** NATS-related logs use a standard shape: `event`, `subject`, `status` (success | failed | retry), `attempt`, `duration_ms`, `error`. Queue jobs log on success, failure, and each retry.
 
 ---
 
@@ -335,15 +337,17 @@ With the RPC responder running, SendNotificationJob calls `user.rpc.preferences`
 ## 13. Configuration Summary
 
 - **Queue:** `config/queue.php` — connection `nats`, optional `dead_letter_queue`, JetStream `delayed` (stream, subject_prefix, consumer).
-- **NATS:** `config/nats.php` — connections `default` and `analytics`; JetStream and queue options.
+- **NATS:** `config/nats.php` — connections `default` and `analytics`; JetStream and queue options. Authentication: `NATS_USER`, `NATS_PASSWORD`, or `NATS_TOKEN` (optional).
 - **Subjects:** `config/nats_subjects.php` — subject name constants.
 
 Environment variables used (see `.env.example`):
 
 - `QUEUE_CONNECTION=nats`
 - `NATS_HOST`, `NATS_PORT`, `NATS_QUEUE_DELAYED_ENABLED`
+- `NATS_USER`, `NATS_PASSWORD`, `NATS_TOKEN` (optional; for NATS auth)
+- `NATS_JETSTREAM_ACK_WAIT`, `NATS_JETSTREAM_MAX_DELIVER` (consumer retry)
 - `NATS_ANALYTICS_HOST`, `NATS_ANALYTICS_PORT` (for analytics connection)
-- `NATS_QUEUE_DLQ` (optional, for dead-letter subject)
+- `NATS_QUEUE_DLQ` (optional, for dead-letter subject, default `chat.dlq`)
 - DB_* for MySQL/SQLite
 
 ---
