@@ -5,10 +5,43 @@ namespace App\Support;
 use Illuminate\Support\Facades\Log;
 
 /**
- * Structured logging for NATS events (event, status, room_id, duration_ms).
+ * Structured logging for NATS: standard shape
+ * { "event", "subject", "status": "success|failed|retry", "attempt", "duration_ms", "error" }.
  */
 final class NatsStructuredLog
 {
+    public const STATUS_SUCCESS = 'success';
+
+    public const STATUS_FAILED = 'failed';
+
+    public const STATUS_RETRY = 'retry';
+
+    /**
+     * Log with standard production shape.
+     */
+    public static function messageProcessed(
+        string $event,
+        string $subject,
+        string $status,
+        int $attempt,
+        float $durationMs,
+        ?string $error = null,
+    ): void {
+        $payload = [
+            'event' => $event,
+            'subject' => $subject,
+            'status' => $status,
+            'attempt' => $attempt,
+            'duration_ms' => round($durationMs, 2),
+            'error' => $error,
+        ];
+        if ($status === self::STATUS_FAILED || $error !== null) {
+            Log::error($event, $payload);
+        } else {
+            Log::info($event, $payload);
+        }
+    }
+
     public static function event(
         string $event,
         string $status,
