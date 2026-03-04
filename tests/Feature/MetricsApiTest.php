@@ -24,10 +24,11 @@ class MetricsApiTest extends TestCase
 
         $response->assertStatus(200)
             ->assertJsonStructure([
-                'messages_processed',
-                'messages_failed',
-                'retries_count',
-                'avg_processing_time_ms',
+                'total_messages',
+                'processed_messages',
+                'failed_messages',
+                'retries',
+                'avg_processing_time',
             ]);
     }
 }
