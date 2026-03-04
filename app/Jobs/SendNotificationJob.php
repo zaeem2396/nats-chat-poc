@@ -28,12 +28,24 @@ class SendNotificationJob implements ShouldQueue
     public function handle(MetricsService $metrics): void
     {
         $start = microtime(true);
+        $subject = 'queue.default';
         $roomId = $this->payload['room_id'] ?? null;
+        $attempt = $this->attempts();
+
+        $metrics->incrementTotalMessages();
+        if ($attempt > 1) {
+            $metrics->incrementRetries();
+            NatsStructuredLog::messageProcessed(
+                'notification.job.retry',
+                $subject,
+                NatsStructuredLog::STATUS_RETRY,
+                $attempt,
+                (microtime(true) - $start) * 1000,
+                null,
+            );
+        }
 
         try {
-            if ($this->attempts() > 1) {
-                $metrics->incrementRetries();
-            }
             $content = $this->payload['content'] ?? '';
             if (str_contains($content, 'fail-test')) {
                 Log::warning('SendNotificationJob: failing intentionally (fail-test)', ['payload' => $this->payload]);
@@ -54,17 +66,24 @@ class SendNotificationJob implements ShouldQueue
             $durationMs = (microtime(true) - $start) * 1000;
             $metrics->incrementProcessed();
             $metrics->recordProcessingTime($durationMs);
-            NatsStructuredLog::withDuration('notification.sent', 'ok', $durationMs, [
-                'user_id' => $this->userId,
-                'room_id' => $roomId,
-            ]);
+            NatsStructuredLog::messageProcessed(
+                'notification.sent',
+                $subject,
+                NatsStructuredLog::STATUS_SUCCESS,
+                $attempt,
+                $durationMs,
+                null,
+            );
         } catch (Throwable $e) {
-            NatsStructuredLog::error('notification.job.failed', 'error', $e, [
-                'user_id' => $this->userId,
-                'room_id' => $roomId,
-                'attempt' => $this->attempts(),
-                'duration_ms' => round((microtime(true) - $start) * 1000, 2),
-            ]);
+            $durationMs = (microtime(true) - $start) * 1000;
+            NatsStructuredLog::messageProcessed(
+                'notification.job.failed',
+                $subject,
+                NatsStructuredLog::STATUS_FAILED,
+                $attempt,
+                $durationMs,
+                $e->getMessage(),
+            );
             throw $e;
         }
     }
@@ -72,8 +91,13 @@ class SendNotificationJob implements ShouldQueue
     public function failed(?\Throwable $exception = null): void
     {
         app(MetricsService::class)->incrementFailed();
-        NatsStructuredLog::error('notification.job.final_failure', 'failed', $exception ?? new \RuntimeException('Unknown'), [
-            'user_id' => $this->userId,
-        ]);
+        NatsStructuredLog::messageProcessed(
+            'notification.job.final_failure',
+            'queue.default',
+            NatsStructuredLog::STATUS_FAILED,
+            $this->attempts(),
+            0,
+            $exception?->getMessage(),
+        );
     }
 }
