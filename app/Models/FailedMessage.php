@@ -9,7 +9,9 @@ class FailedMessage extends Model
     protected $fillable = [
         'subject',
         'payload',
+        'error_message',
         'error_reason',
+        'attempts',
         'original_queue',
         'original_connection',
         'failed_at',
@@ -17,6 +19,7 @@ class FailedMessage extends Model
 
     protected $casts = [
         'payload' => 'array',
+        'attempts' => 'integer',
         'failed_at' => 'datetime',
     ];
 }
