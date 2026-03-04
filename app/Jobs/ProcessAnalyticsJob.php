@@ -28,16 +28,28 @@ class ProcessAnalyticsJob implements ShouldQueue
     public function handle(MetricsService $metrics): void
     {
         $start = microtime(true);
+        $subject = 'queue.default';
         $roomId = $this->payload['room_id'] ?? null;
+        $messageId = $this->payload['message_id'] ?? null;
+        $attempt = $this->attempts();
+
+        $metrics->incrementTotalMessages();
+        if ($messageId && \Illuminate\Support\Facades\Cache::has('processed_analytics:' . $messageId)) {
+            return; // idempotency
+        }
+        if ($attempt > 1) {
+            $metrics->incrementRetries();
+            NatsStructuredLog::messageProcessed(
+                'analytics.job.retry',
+                $subject,
+                NatsStructuredLog::STATUS_RETRY,
+                $attempt,
+                (microtime(true) - $start) * 1000,
+                null,
+            );
+        }
 
         try {
-            $messageId = $this->payload['message_id'] ?? null;
-            if ($messageId && \Illuminate\Support\Facades\Cache::has('processed_analytics:' . $messageId)) {
-                return; // idempotency
-            }
-            if ($this->attempts() > 1) {
-                $metrics->incrementRetries();
-            }
             $content = $this->payload['content'] ?? '';
             if (str_contains($content, 'fail-test')) {
                 Log::warning('ProcessAnalyticsJob: failing intentionally (fail-test)', ['payload' => $this->payload]);
@@ -66,15 +78,24 @@ class ProcessAnalyticsJob implements ShouldQueue
             if ($messageId) {
                 \Illuminate\Support\Facades\Cache::put('processed_analytics:' . $messageId, true, 86400);
             }
-            NatsStructuredLog::withDuration('analytics.job.processed', 'ok', $durationMs, [
-                'room_id' => $roomId,
-            ]);
+            NatsStructuredLog::messageProcessed(
+                'analytics.job.processed',
+                $subject,
+                NatsStructuredLog::STATUS_SUCCESS,
+                $attempt,
+                $durationMs,
+                null,
+            );
         } catch (\Throwable $e) {
-            NatsStructuredLog::error('analytics.job.failed', 'error', $e, [
-                'room_id' => $roomId,
-                'attempt' => $this->attempts(),
-                'duration_ms' => round((microtime(true) - $start) * 1000, 2),
-            ]);
+            $durationMs = (microtime(true) - $start) * 1000;
+            NatsStructuredLog::messageProcessed(
+                'analytics.job.failed',
+                $subject,
+                NatsStructuredLog::STATUS_FAILED,
+                $attempt,
+                $durationMs,
+                $e->getMessage(),
+            );
             throw $e;
         }
     }
@@ -82,8 +103,13 @@ class ProcessAnalyticsJob implements ShouldQueue
     public function failed(?\Throwable $exception = null): void
     {
         app(MetricsService::class)->incrementFailed();
-        NatsStructuredLog::error('analytics.job.final_failure', 'failed', $exception ?? new \RuntimeException('Unknown'), [
-            'room_id' => $this->payload['room_id'] ?? null,
-        ]);
+        NatsStructuredLog::messageProcessed(
+            'analytics.job.final_failure',
+            'queue.default',
+            NatsStructuredLog::STATUS_FAILED,
+            $this->attempts(),
+            0,
+            $exception?->getMessage(),
+        );
     }
 }
