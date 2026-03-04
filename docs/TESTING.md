@@ -116,8 +116,8 @@ docker compose exec app php artisan test
 - **RoomsApiTest:** list rooms (empty and with rooms), create room (success and name validation), room history (empty, with messages, 404 for missing room).
 - **MessageApiTest:** send message (success, validation for user_id/content, user_id min:1, 404 for missing room), schedule message (success, validation for user_id/content and delay_minutes range, 404 for missing room).
 - **AnalyticsApiTest:** get analytics for room (without/with analytic record, 404 for missing room).
-- **DlqApiTest:** GET /api/dlq (empty list and with failed messages).
-- **MetricsApiTest:** GET /api/metrics returns structure (messages_processed, messages_failed, retries_count, avg_processing_time_ms).
+- **DlqApiTest:** GET /api/dlq (empty list and with failed messages; response includes `error_message`, `attempts`).
+- **MetricsApiTest:** GET /api/metrics returns structure (`total_messages`, `processed_messages`, `failed_messages`, `retries`, `avg_processing_time`).
 
 ---
 
@@ -129,7 +129,7 @@ Failed queue jobs (after max retries) are published to **chat.dlq** and can be s
 2. **Run DLQ store worker**: `php artisan nats-chat:dlq-store` (consumes from JetStream and writes to `failed_messages` table).
 3. **List failed messages**: `GET /api/dlq` (paginated).
 
-JetStream consumer retry is configured via `NATS_JETSTREAM_ACK_WAIT` and `NATS_JETSTREAM_MAX_DELIVER` (see `config/nats.php`).
+The `failed_messages` table has: `id`, `subject`, `payload` (JSON), `error_message`, `attempts`, `original_queue`, `original_connection`, `failed_at`, `created_at`. JetStream consumer retry is configured via `NATS_JETSTREAM_ACK_WAIT` and `NATS_JETSTREAM_MAX_DELIVER` (see `config/nats.php`).
 
 ---
 
