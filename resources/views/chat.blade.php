@@ -78,7 +78,7 @@
                         <button type="button" class="btn btn-secondary" id="btnRefresh">Refresh</button>
                     </div>
                     <div id="messageArea"></div>
-                    <div class="analytics-box" id="analyticsBox">Message count: —</div>
+                    <div class="analytics-box" id="analyticsBox">Message count: -</div>
                     <div id="formErrors"></div>
                     <div class="forms">
                         <div class="form-group">
@@ -175,7 +175,7 @@
             const res = await fetch(api + '/analytics/room/' + selectedRoomId);
             if (!res.ok) return;
             const data = await res.json();
-            document.getElementById('analyticsBox').innerHTML = '<strong>Message count:</strong> ' + (data.message_count ?? '—');
+            document.getElementById('analyticsBox').innerHTML = '<strong>Message count:</strong> ' + (data.message_count ?? '-');
         }
 
         function showFormMessage(msg, isError) {

@@ -1,4 +1,4 @@
-# NATS Chat PoC — Full Documentation
+# NATS Chat PoC - Full Documentation
 
 This document describes the **NATS Chat Proof of Concept**: a Laravel-based chat backend that demonstrates the [zaeem2396/laravel-nats](https://github.com/zaeem2396/laravel-nats) package in a realistic scenario. It is suitable for proposals, demos, and technical evaluation.
 
@@ -85,7 +85,7 @@ Ports are chosen to avoid clashes with other projects:
 | NATS       | 8222 (monitor)             | **8224**  | http://localhost:8224 |
 
 - **API base:** `http://localhost:8090` (prefix: `/api`).
-- **phpMyAdmin:** http://localhost:8091 — Server: `mysql`, User: `nats_chat`, Password: `secret` (or root/`root`).
+- **phpMyAdmin:** http://localhost:8091 - Server: `mysql`, User: `nats_chat`, Password: `secret` (or root/`root`).
 
 ---
 
@@ -115,14 +115,14 @@ docker compose exec app php artisan migrate --force
 
 Containers started:
 
-- **app** — Laravel HTTP server (port 8090).
-- **queue** — `php artisan nats:work` (NATS queue jobs).
-- **moderation** — `php artisan nats:consume "chat.room.*.message" --handler=App\Handlers\ModerationMessageHandler`.
-- **rpc-responder** — `php artisan nats:consume "user.rpc.preferences" --handler=App\Handlers\UserPreferencesRpcHandler`.
-- **analytics** — `php artisan nats-chat:analytics-worker` (JetStream durable consumer).
-- **mysql** — MySQL 8.0 (port 3307).
-- **phpmyadmin** — phpMyAdmin (port 8091).
-- **nats** — NATS with JetStream (ports 4223, 8224).
+- **app** - Laravel HTTP server (port 8090).
+- **queue** - `php artisan nats:work` (NATS queue jobs).
+- **moderation** - `php artisan nats:consume "chat.room.*.message" --handler=App\Handlers\ModerationMessageHandler`.
+- **rpc-responder** - `php artisan nats:consume "user.rpc.preferences" --handler=App\Handlers\UserPreferencesRpcHandler`.
+- **analytics** - `php artisan nats-chat:analytics-worker` (JetStream durable consumer).
+- **mysql** - MySQL 8.0 (port 3307).
+- **phpmyadmin** - phpMyAdmin (port 8091).
+- **nats** - NATS with JetStream (ports 4223, 8224).
 
 ### 4.3 Verify
 
@@ -336,9 +336,9 @@ With the RPC responder running, SendNotificationJob calls `user.rpc.preferences`
 
 ## 13. Configuration Summary
 
-- **Queue:** `config/queue.php` — connection `nats`, optional `dead_letter_queue`, JetStream `delayed` (stream, subject_prefix, consumer).
-- **NATS:** `config/nats.php` — connections `default` and `analytics`; JetStream and queue options. Authentication: `NATS_USER`, `NATS_PASSWORD`, or `NATS_TOKEN` (optional).
-- **Subjects:** `config/nats_subjects.php` — subject name constants.
+- **Queue:** `config/queue.php` - connection `nats`, optional `dead_letter_queue`, JetStream `delayed` (stream, subject_prefix, consumer).
+- **NATS:** `config/nats.php` - connections `default` and `analytics`; JetStream and queue options. Authentication: `NATS_USER`, `NATS_PASSWORD`, or `NATS_TOKEN` (optional).
+- **Subjects:** `config/nats_subjects.php` - subject name constants.
 
 Environment variables used (see `.env.example`):
 

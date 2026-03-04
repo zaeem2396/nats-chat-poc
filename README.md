@@ -13,18 +13,18 @@ See **[docs/DOCUMENTATION.md](docs/DOCUMENTATION.md)** for a full diagram and da
 
 ## What This PoC Demonstrates
 
-- **Publish/Subscribe** — Chat messages published to NATS subjects; subscribers for moderation and analytics
-- **Wildcards** — Single-level (`chat.room.*.message`) and multi-level (`chat.room.>`) subscriptions
-- **Request/Reply (RPC)** — User preferences via `user.rpc.preferences`
-- **NATS as Laravel queue driver** — Jobs processed with `nats:work` (retries, backoff, failed jobs)
-- **JetStream** — Streams, durable consumers, pull consumption, acknowledgements
-- **Delayed jobs** — Scheduled messages via JetStream delayed queue
-- **Multiple NATS connections** — Default + analytics connection
-- **Package Artisan commands** — `nats:work`, `nats:consume` with handler classes
-- **DLQ** — Failed jobs published to `chat.dlq`, stored in DB, `GET /api/dlq`
-- **Metrics** — `GET /api/metrics` (processed, failed, retries, avg processing time)
-- **Event versioning** — Payload `{ version, type, data }`; idempotency via `message_id`
-- **Multi-worker** — Two queue workers in Docker (same queue = load balanced)
+- **Publish/Subscribe** - Chat messages published to NATS subjects; subscribers for moderation and analytics
+- **Wildcards** - Single-level (`chat.room.*.message`) and multi-level (`chat.room.>`) subscriptions
+- **Request/Reply (RPC)** - User preferences via `user.rpc.preferences`
+- **NATS as Laravel queue driver** - Jobs processed with `nats:work` (retries, backoff, failed jobs)
+- **JetStream** - Streams, durable consumers, pull consumption, acknowledgements
+- **Delayed jobs** - Scheduled messages via JetStream delayed queue
+- **Multiple NATS connections** - Default + analytics connection
+- **Package Artisan commands** - `nats:work`, `nats:consume` with handler classes
+- **DLQ** - Failed jobs published to `chat.dlq`, stored in DB, `GET /api/dlq`
+- **Metrics** - `GET /api/metrics` (processed, failed, retries, avg processing time)
+- **Event envelope** - Payload `{ id, type, version, data }`; idempotency via `message_id`; structured logs (event, subject, status, attempt, duration_ms, error)
+- **Multi-worker** - Two queue workers in Docker (same queue = load balanced)
 
 ## Feature Mapping (laravel-nats vs this project)
 
@@ -92,14 +92,14 @@ docker compose exec app php artisan migrate --force
 
 Containers started:
 
-- **app** — Laravel on port 8090
-- **queue**, **queue-2** — `php artisan nats:work` (same queue = load balanced)
-- **moderation** — `nats:consume "chat.room.*.message"` with `ModerationMessageHandler`
-- **rpc-responder** — `nats:consume "user.rpc.preferences"` with `UserPreferencesRpcHandler`
-- **analytics** — JetStream durable consumer (analytics worker)
-- **mysql** — MySQL on host port 3307
-- **phpmyadmin** — http://localhost:8091 (server: `mysql`, user: `nats_chat`, password: `secret`)
-- **nats** — NATS + JetStream on 4223 / 8224
+- **app** - Laravel on port 8090
+- **queue**, **queue-2** - `php artisan nats:work` (same queue = load balanced)
+- **moderation** - `nats:consume "chat.room.*.message"` with `ModerationMessageHandler`
+- **rpc-responder** - `nats:consume "user.rpc.preferences"` with `UserPreferencesRpcHandler`
+- **analytics** - JetStream durable consumer (analytics worker)
+- **mysql** - MySQL on host port 3307
+- **phpmyadmin** - http://localhost:8091 (server: `mysql`, user: `nats_chat`, password: `secret`)
+- **nats** - NATS + JetStream on 4223 / 8224
 
 **How to run and usage:** See **[docs/RUNNING.md](docs/RUNNING.md)** for step-by-step run, API usage, and all Artisan commands.
 
@@ -121,23 +121,23 @@ From the UI you can: create rooms, send messages, schedule delayed messages, vie
 | POST | `/api/rooms/{id}/schedule` | Schedule message (delayed job) `{ "user_id": 1, "content": "Later", "delay_minutes": 1 }` |
 | GET | `/api/rooms/{id}/history` | Room message history |
 | GET | `/api/analytics/room/{id}` | Room analytics (message_count) |
-| GET | `/api/dlq` | List failed messages (DLQ) `?per_page=20` |
-| GET | `/api/metrics` | Metrics (messages_processed, messages_failed, retries_count, avg_processing_time_ms) |
+| GET | `/api/dlq` | List failed messages (DLQ; includes `error_message`, `attempts`) `?per_page=20` |
+| GET | `/api/metrics` | Metrics: `total_messages`, `processed_messages`, `failed_messages`, `retries`, `avg_processing_time` |
 
 ## Artisan Commands
 
 ### Package (laravel-nats)
 
-- `php artisan nats:work` — NATS queue worker
-- `php artisan nats:consume "{subject}" --handler=ClassName` — Subject consumer with handler
+- `php artisan nats:work` - NATS queue worker
+- `php artisan nats:consume "{subject}" --handler=ClassName` - Subject consumer with handler
 
 ### This project
 
-- `php artisan nats-chat:analytics-worker` — JetStream durable consumer for analytics
-- `php artisan nats-chat:dlq-bootstrap` — Create DLQ stream (run once)
-- `php artisan nats-chat:dlq-store` — Consume DLQ → failed_messages table
-- `php artisan nats-chat:load-test [--count=1000] [--use-http]` — Load test
-- `php artisan nats-chat:failed-jobs` — List failed NATS jobs
+- `php artisan nats-chat:analytics-worker` - JetStream durable consumer for analytics
+- `php artisan nats-chat:dlq-bootstrap` - Create DLQ stream (run once)
+- `php artisan nats-chat:dlq-store` - Consume DLQ → failed_messages table
+- `php artisan nats-chat:load-test [--count=1000] [--use-http]` - Load test
+- `php artisan nats-chat:failed-jobs` - List failed NATS jobs
 
 ## Subject Structure
 
@@ -167,9 +167,9 @@ From the UI you can: create rooms, send messages, schedule delayed messages, vie
 
 ## Documentation
 
-- **[docs/RUNNING.md](docs/RUNNING.md)** — How to run (Docker + local), API usage, all Artisan commands.
-- **[docs/DOCUMENTATION.md](docs/DOCUMENTATION.md)** — Architecture, API reference, NATS monitoring, event versioning, config profiles, troubleshooting.
-- **[docs/TESTING.md](docs/TESTING.md)** — Manual and automated testing.
+- **[docs/RUNNING.md](docs/RUNNING.md)** - How to run (Docker + local), API usage, all Artisan commands.
+- **[docs/DOCUMENTATION.md](docs/DOCUMENTATION.md)** - Architecture, API reference, NATS monitoring, event versioning, config profiles, troubleshooting.
+- **[docs/TESTING.md](docs/TESTING.md)** - Manual and automated testing.
 
 ## Local Setup (No Docker)
 

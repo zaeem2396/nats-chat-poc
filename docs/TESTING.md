@@ -11,7 +11,7 @@ Use the **web UI** for manual testing (recommended). Optionally run **PHPUnit** 
 
 ---
 
-## 1. Web UI — What to provide for each action
+## 1. Web UI - What to provide for each action
 
 All testing is done at **http://localhost:8090**. The UI has a **sidebar** (rooms list + create) and a **main area** (selected room: history, analytics, send/schedule forms).
 
@@ -57,7 +57,7 @@ Select a room first. Then:
 
 ### Send fail-test message
 
-- **No inputs** — click the red **Send fail-test message** button.
+- **No inputs** - click the red **Send fail-test message** button.
 - This sends a fixed message that causes moderation/notification/analytics jobs to **throw**, retry, and then land in `failed_jobs`.
 - After running, list failed jobs in the CLI:  
   `docker compose exec app php artisan nats-chat:failed-jobs`
@@ -66,7 +66,7 @@ Select a room first. Then:
 
 ### Refresh (history and analytics)
 
-- **No inputs** — click **Refresh** in the room header.
+- **No inputs** - click **Refresh** in the room header.
 - Reloads **Room history** (messages) and **Message count** (analytics). Use this after sending messages or waiting for a scheduled message so the UI shows the latest data.
 
 ---

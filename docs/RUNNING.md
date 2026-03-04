@@ -53,14 +53,14 @@ Base URL: **http://localhost:8090/api**
 
 | Method | Endpoint | Body (JSON) |
 |--------|----------|--------------|
-| GET | `/rooms` | — |
+| GET | `/rooms` | - |
 | POST | `/rooms` | `{ "name": "General" }` |
 | POST | `/rooms/{id}/message` | `{ "user_id": 1, "content": "Hello" }` |
 | POST | `/rooms/{id}/schedule` | `{ "user_id": 1, "content": "Later", "delay_minutes": 1 }` |
-| GET | `/rooms/{id}/history` | — |
-| GET | `/analytics/room/{id}` | — |
-| GET | `/dlq` | — (optional `?per_page=20`). Response: paginated list with `id`, `subject`, `payload`, `error_message`, `attempts`, `created_at`. |
-| GET | `/metrics` | —. Response: `total_messages`, `processed_messages`, `failed_messages`, `retries`, `avg_processing_time` (ms). |
+| GET | `/rooms/{id}/history` | - |
+| GET | `/analytics/room/{id}` | - |
+| GET | `/dlq` | - (optional `?per_page=20`). Response: paginated list with `id`, `subject`, `payload`, `error_message`, `attempts`, `created_at`. |
+| GET | `/metrics` | -. Response: `total_messages`, `processed_messages`, `failed_messages`, `retries`, `avg_processing_time` (ms). |
 
 **Example (curl):**
 
