@@ -31,8 +31,9 @@ class ChatMessageService
         ];
 
         $payload = [
-            'version' => self::VERSION,
+            'id' => $messageId,
             'type' => self::EVENT_TYPE,
+            'version' => self::VERSION,
             'data' => $data,
         ];
 
