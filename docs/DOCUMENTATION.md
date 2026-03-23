@@ -34,7 +34,7 @@ This document describes the **NATS Chat Proof of Concept**: a Laravel-based chat
          │                                                    │                                                    │
          ▼                                                    ▼                                                    ▼
 ┌─────────────────┐                              ┌─────────────────────┐                              ┌─────────────────┐
-│ Nats::publish   │                              │  Persist message    │                              │  JetStream       │
+│ NatsV2::publish │                              │  Persist message    │                              │  JetStream       │
 │ chat.room.{id}  │                              │  (messages table)   │                              │  stream         │
 │ .message        │                              └─────────────────────┘                              │  chat-stream     │
 └────────┬────────┘                                                                                     └────────┬────────┘
@@ -356,7 +356,7 @@ Environment variables used (see `.env.example`):
 
 | Feature | How |
 |--------|-----|
-| Publish | `Nats::publish()` in ChatMessageService / ChatMessagePublisher |
+| Publish | `NatsV2::publish()` in ChatMessageService |
 | Subscribe | `nats:consume` with ModerationMessageHandler, UserPreferencesRpcHandler |
 | Request/Reply | `Nats::request()` in SendNotificationJob; RPC handler publishes to reply subject |
 | Queue driver | Jobs on `nats` connection; `nats:work` |

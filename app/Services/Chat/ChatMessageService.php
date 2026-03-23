@@ -5,18 +5,14 @@ namespace App\Services\Chat;
 use App\Models\Message;
 use App\Models\Room;
 use Illuminate\Support\Str;
-use LaravelNats\Laravel\Facades\Nats;
+use LaravelNats\Laravel\Facades\NatsV2;
 
 /**
- * Publishes chat messages to NATS (versioned payload) and persists to DB.
- * Payload: { version: "v1", type: "chat.message.created", data: { ... } }
+ * Publishes chat messages via the v2 stack (basis-company/nats + JSON envelope).
+ * Envelope: id + type (NATS subject) + version + data; consumers use {@see \App\Support\EventPayload::unwrap()}.
  */
 class ChatMessageService
 {
-    public const EVENT_TYPE = 'chat.message.created';
-
-    public const VERSION = 'v1';
-
     public function send(Room $room, int $userId, string $content): Message
     {
         $messageId = (string) Str::uuid();
@@ -30,15 +26,8 @@ class ChatMessageService
             'timestamp' => $timestamp->toIso8601String(),
         ];
 
-        $payload = [
-            'id' => $messageId,
-            'type' => self::EVENT_TYPE,
-            'version' => self::VERSION,
-            'data' => $data,
-        ];
-
         $subject = 'chat.room.'.$room->id.'.message';
-        Nats::publish($subject, $payload);
+        NatsV2::publish($subject, $data);
 
         \Log::info('Chat message published', ['subject' => $subject, 'message_id' => $messageId]);
 

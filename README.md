@@ -23,14 +23,15 @@ See **[docs/DOCUMENTATION.md](docs/DOCUMENTATION.md)** for a full diagram and da
 - **Package Artisan commands** - `nats:work`, `nats:consume` with handler classes
 - **DLQ** - Failed jobs published to `chat.dlq`, stored in DB, `GET /api/dlq`
 - **Metrics** - `GET /api/metrics` (processed, failed, retries, avg processing time)
-- **Event envelope** - Payload `{ id, type, version, data }`; idempotency via `message_id`; structured logs (event, subject, status, attempt, duration_ms, error)
+- **v2 envelope (basis-company/nats)** - `NatsV2::publish` adds `{ id, type: <subject>, version, data }`; `nats-v2-listen` container prints JSON lines; consumers use `EventPayload::unwrap()` for flat `data`; idempotency via `message_id`
 - **Multi-worker** - Two queue workers in Docker (same queue = load balanced)
 
 ## Feature Mapping (laravel-nats vs this project)
 
 | laravel-nats feature | This project |
 |----------------------|--------------|
-| `Nats::publish()` | ChatMessageService publishes to `chat.room.{id}.message` |
+| `NatsV2::publish` (v2 envelope) | ChatMessageService publishes to `chat.room.{id}.message` |
+| `nats:v2:listen` | **nats-v2-listen** container (same wildcard as moderation; demo of basis subscriber) |
 | `nats:consume` + handler | ModerationMessageHandler, UserPreferencesRpcHandler |
 | `nats:work` (queue) | queue + queue-2 containers; ModerateMessageJob, SendNotificationJob, ProcessAnalyticsJob |
 | JetStream stream/consumer | ChatStreamBootstrap (chat-stream), DlqStreamBootstrap (dlq), analytics-worker |
@@ -74,15 +75,19 @@ Ports are set to avoid clashes with other projects:
 | MySQL      | localhost:**3307**       |
 | NATS       | **4223** (client), **8224** (monitor) |
 
+If **8090**, **4223**, or **8224** are already in use on the host, set env vars when running Compose (Docker still uses internal `nats:4222`). You can add `APP_HOST_PORT`, `NATS_HOST_CLIENT_PORT`, and `NATS_HOST_MONITOR_PORT` to a `.env` file next to `docker-compose.yml`, or pass them inline, e.g.:
+
+`APP_HOST_PORT=18091 docker compose up -d`  
+then `docker compose up -d --force-recreate app` so `APP_URL` matches.
+
 ```bash
-# Install dependencies (laravel-nats is pulled from Packagist / https://github.com/zaeem2396/laravel-nats)
+# Install dependencies (see composer.json: VCS dev branch feat/v2.1-subscriber of laravel-nats)
 composer install
 
 # Use MySQL in Docker: copy Docker env so the app uses MySQL (not SQLite from .env)
 cp .env.docker .env
 # Or merge DB_* and NATS_* from .env.docker into your existing .env
 
-# Start all services
 docker compose up -d
 
 # Run migrations and clear config cache
@@ -92,9 +97,10 @@ docker compose exec app php artisan migrate --force
 
 Containers started:
 
-- **app** - Laravel on port 8090
+- **app** - Laravel (default host port **8090**, or `APP_HOST_PORT` if set)
 - **queue**, **queue-2** - `php artisan nats:work` (same queue = load balanced)
 - **moderation** - `nats:consume "chat.room.*.message"` with `ModerationMessageHandler`
+- **nats-v2-listen** - `nats:v2:listen "chat.room.*.message"` (v2 subscriber stack / basis client)
 - **rpc-responder** - `nats:consume "user.rpc.preferences"` with `UserPreferencesRpcHandler`
 - **analytics** - JetStream durable consumer (analytics worker)
 - **mysql** - MySQL on host port 3307
@@ -105,9 +111,7 @@ Containers started:
 
 ### Try It
 
-Open the **web UI** in your browser:
-
-**http://localhost:8090**
+Open **http://localhost:8090** (or your `APP_HOST_PORT` if you changed it). You should see the **chat** UI.
 
 From the UI you can: create rooms, send messages, schedule delayed messages, view history and analytics, and trigger the fail-test message (for failed jobs demo). No curl needed.
 
