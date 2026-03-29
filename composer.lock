@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "1e078c3551ce84c6d82dde7f0dd70b6b",
+    "content-hash": "4639d8335d2a75cc2f6af7f38df5be1b",
     "packages": [
         {
             "name": "basis-company/nats",
@@ -6076,16 +6076,16 @@
         },
         {
             "name": "zaeem2396/laravel-nats",
-            "version": "dev-feat/v2.1-subscriber",
+            "version": "v1.4.0",
             "source": {
                 "type": "git",
                 "url": "https://github.com/zaeem2396/laravel-nats.git",
-                "reference": "a51988f94a549e1982017282a567d2434b72ee3c"
+                "reference": "409783e6a54f6c4751299d36a5cddb2b8c949e05"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/zaeem2396/laravel-nats/zipball/a51988f94a549e1982017282a567d2434b72ee3c",
-                "reference": "a51988f94a549e1982017282a567d2434b72ee3c",
+                "url": "https://api.github.com/repos/zaeem2396/laravel-nats/zipball/409783e6a54f6c4751299d36a5cddb2b8c949e05",
+                "reference": "409783e6a54f6c4751299d36a5cddb2b8c949e05",
                 "shasum": ""
             },
             "require": {
@@ -6105,13 +6105,13 @@
             "type": "library",
             "extra": {
                 "laravel": {
-                    "providers": [
-                        "LaravelNats\\Laravel\\Providers\\NatsServiceProvider"
-                    ],
                     "aliases": {
                         "Nats": "LaravelNats\\Laravel\\Facades\\Nats",
                         "NatsV2": "LaravelNats\\Laravel\\Facades\\NatsV2"
-                    }
+                    },
+                    "providers": [
+                        "LaravelNats\\Laravel\\Providers\\NatsServiceProvider"
+                    ]
                 }
             },
             "autoload": {
@@ -6119,28 +6119,7 @@
                     "LaravelNats\\": "src/"
                 }
             },
-            "autoload-dev": {
-                "psr-4": {
-                    "LaravelNats\\Tests\\": "tests/"
-                }
-            },
-            "scripts": {
-                "test": [
-                    "vendor/bin/pest"
-                ],
-                "test:coverage": [
-                    "vendor/bin/pest --coverage"
-                ],
-                "analyse": [
-                    "vendor/bin/phpstan analyse"
-                ],
-                "format": [
-                    "vendor/bin/php-cs-fixer fix 2>/dev/null"
-                ],
-                "format:check": [
-                    "vendor/bin/php-cs-fixer fix --dry-run --diff 2>/dev/null"
-                ]
-            },
+            "notification-url": "https://packagist.org/downloads/",
             "license": [
                 "MIT"
             ],
@@ -6150,7 +6129,7 @@
                     "homepage": "https://github.com/zaeem2396"
                 }
             ],
-            "description": "Laravel NATS - v2 basis stack (basis-company/nats), subscriber API, queue driver, JetStream, Artisan commands",
+            "description": "Laravel NATS - v2 basis stack (basis-company/nats), subscriber, NatsV2 JetStream helpers, queue driver, legacy JetStream, Artisan commands",
             "keywords": [
                 "basis-nats",
                 "jetstream",
@@ -6162,10 +6141,10 @@
                 "queue"
             ],
             "support": {
-                "source": "https://github.com/zaeem2396/laravel-nats/tree/feat/v2.1-subscriber",
-                "issues": "https://github.com/zaeem2396/laravel-nats/issues"
+                "issues": "https://github.com/zaeem2396/laravel-nats/issues",
+                "source": "https://github.com/zaeem2396/laravel-nats/tree/v1.4.0"
             },
-            "time": "2026-03-22T14:46:56+00:00"
+            "time": "2026-03-29T11:25:49+00:00"
         }
     ],
     "packages-dev": [
@@ -8545,9 +8524,7 @@
     ],
     "aliases": [],
     "minimum-stability": "dev",
-    "stability-flags": {
-        "zaeem2396/laravel-nats": 20
-    },
+    "stability-flags": [],
     "prefer-stable": true,
     "prefer-lowest": false,
     "platform": {

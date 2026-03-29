@@ -38,6 +38,8 @@ See **[docs/DOCUMENTATION.md](docs/DOCUMENTATION.md)** for a full diagram and da
 | Delayed jobs (JetStream) | Schedule message endpoint |
 | Request/reply | SendNotificationJob → `user.rpc.preferences` → UserPreferencesRpcHandler |
 | Dead letter queue | `chat.dlq` → failed_messages table, `GET /api/dlq` |
+| `nats_basis` queue driver (v1.4+) | Optional `QUEUE_CONNECTION=nats_basis` in `.env` (see `config/queue.php`) |
+| `NatsV2::ping` / `php artisan nats:ping` | `GET /api/health` → `nats_v2_reachable` |
 
 ## Failure Scenarios
 
@@ -81,7 +83,7 @@ If **8090**, **4223**, or **8224** are already in use on the host, set env vars 
 then `docker compose up -d --force-recreate app` so `APP_URL` matches.
 
 ```bash
-# Install dependencies (see composer.json: VCS dev branch feat/v2.1-subscriber of laravel-nats)
+# Install dependencies (laravel-nats ^1.4 from Packagist)
 composer install
 
 # Use MySQL in Docker: copy Docker env so the app uses MySQL (not SQLite from .env)
@@ -119,6 +121,7 @@ From the UI you can: create rooms, send messages, schedule delayed messages, vie
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
+| GET | `/api/health` | Liveness: `status`, `nats_v2_reachable` (`NatsV2::ping`) |
 | GET | `/api/rooms` | List rooms |
 | POST | `/api/rooms` | Create room `{ "name": "General" }` |
 | POST | `/api/rooms/{id}/message` | Send message `{ "user_id": 1, "content": "Hello" }` |
@@ -132,7 +135,9 @@ From the UI you can: create rooms, send messages, schedule delayed messages, vie
 
 ### Package (laravel-nats)
 
-- `php artisan nats:work` - NATS queue worker
+- `php artisan nats:work` - NATS queue worker (legacy `nats` driver)
+- `php artisan nats:ping` - v2 basis connection ping (CLI health check)
+- `php artisan nats:v2:listen "{subject}"` - v2 subscriber loop (envelope-aware)
 - `php artisan nats:consume "{subject}" --handler=ClassName` - Subject consumer with handler
 
 ### This project

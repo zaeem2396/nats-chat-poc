@@ -5,17 +5,11 @@
     "description": "The skeleton application for the Laravel framework.",
     "keywords": ["laravel", "framework"],
     "license": "MIT",
-    "repositories": [
-        {
-            "type": "vcs",
-            "url": "https://github.com/zaeem2396/laravel-nats.git"
-        }
-    ],
     "require": {
         "php": "^8.2",
         "laravel/framework": "^12.0",
         "laravel/tinker": "^2.10.1",
-        "zaeem2396/laravel-nats": "dev-feat/v2.1-subscriber"
+        "zaeem2396/laravel-nats": "^1.4"
     },
     "require-dev": {
         "fakerphp/faker": "^1.23",

@@ -2,9 +2,12 @@
 
 use App\Http\Controllers\AnalyticsController;
 use App\Http\Controllers\DlqController;
+use App\Http\Controllers\HealthController;
 use App\Http\Controllers\MetricsController;
 use App\Http\Controllers\RoomController;
 use Illuminate\Support\Facades\Route;
+
+Route::get('/health', HealthController::class);
 
 Route::get('/rooms', [RoomController::class, 'index']);
 Route::post('/rooms', [RoomController::class, 'store']);

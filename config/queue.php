@@ -105,6 +105,19 @@ return [
             ],
         ],
 
+        /*
+        | v1.4+ basis-company/nats queue driver (same job payload shape as legacy `nats`).
+        | Set QUEUE_CONNECTION=nats_basis to use. JetStream delayed jobs: see package docs/v2/QUEUE.md.
+        */
+        'nats_basis' => [
+            'driver' => 'nats_basis',
+            'queue' => env('NATS_BASIS_QUEUE', env('NATS_QUEUE', 'default')),
+            'retry_after' => (int) env('NATS_BASIS_QUEUE_RETRY_AFTER', env('NATS_QUEUE_RETRY_AFTER', 60)),
+            'prefix' => env('NATS_BASIS_QUEUE_PREFIX', env('NATS_QUEUE_PREFIX', 'laravel.queue.')),
+            'dead_letter_queue' => env('NATS_BASIS_QUEUE_DLQ', env('NATS_QUEUE_DLQ', 'chat.dlq')),
+            'nats_basis_connection' => env('NATS_BASIS_CONNECTION'),
+        ],
+
     ],
 
     /*
