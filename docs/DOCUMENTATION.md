@@ -16,8 +16,8 @@ This document describes the **NATS Chat Proof of Concept**: a Laravel-based chat
 
 | Component        | Technology                          |
 |-----------------|-------------------------------------|
-| Framework       | Laravel 12, PHP 8.3+                |
-| Messaging       | zaeem2396/laravel-nats, NATS 2.x    |
+| Framework       | Laravel 12, **PHP 8.2+** (Dockerfile: PHP 8.3) |
+| Messaging       | **zaeem2396/laravel-nats ^1.5**, NATS 2.x |
 | NATS features   | Core pub/sub, JetStream             |
 | Database        | MySQL 8.0 (Docker) or SQLite (local)|
 | Admin UI        | phpMyAdmin (Docker)                 |

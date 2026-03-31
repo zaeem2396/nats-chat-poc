@@ -40,6 +40,8 @@ See **[docs/DOCUMENTATION.md](docs/DOCUMENTATION.md)** for a full diagram and da
 | Dead letter queue | `chat.dlq` → failed_messages table, `GET /api/dlq` |
 | `nats_basis` queue driver (v1.4+) | Optional `QUEUE_CONNECTION=nats_basis` in `.env` (see `config/queue.php`) |
 | `NatsV2::ping` / `php artisan nats:ping` | `GET /api/health` → `nats_v2_reachable` |
+| v1.5: multi-header publish + `NatsV2::request` | `GET /api/nats/v2/smoke`, `POST /api/nats/v2/rpc/preferences` |
+| `nats:v2:config:validate` | Run in CLI: `docker compose exec app php artisan nats:v2:config:validate` |
 
 ## Failure Scenarios
 
@@ -58,12 +60,23 @@ See **[docs/DOCUMENTATION.md](docs/DOCUMENTATION.md)** for a full diagram and da
 - **Redis (queues):** Simple, in-memory; no built-in replay or durable log.
 - **Kafka:** Durable log, high throughput; heavier ops and resource use. Prefer NATS when you want persistence and ordering without Kafka’s complexity.
 
+## Requirements
+
+| Component | Version |
+|-----------|---------|
+| **PHP** | **8.2+** (see `composer.json`; the Docker image uses **PHP 8.3**) |
+| **Laravel** | **12.x** (`laravel/framework` ^12.0) |
+| **laravel-nats** | **^1.5** ([Packagist](https://packagist.org/packages/zaeem2396/laravel-nats)) |
+| **NATS Server** | 2.x with JetStream enabled for delayed jobs and analytics |
+
+For automated tests on the host, the **pdo_sqlite** PHP extension is required.
+
 ## Tech Stack
 
-- **Laravel 12**, PHP 8.3+
-- **zaeem2396/laravel-nats**
+- **Laravel 12**, **PHP 8.2+**
+- **zaeem2396/laravel-nats** ^1.5
 - **NATS Server** with JetStream
-- **MySQL 8** (Docker) or SQLite (local)
+- **MySQL 8** (Docker) or SQLite (local / PHPUnit)
 - **phpMyAdmin** (Docker) for database access
 
 ## Quick Start (Docker)
@@ -74,27 +87,35 @@ Ports are set to avoid clashes with other projects:
 |------------|--------------------------|
 | Laravel API| http://localhost:**8090** |
 | phpMyAdmin | http://localhost:**8091** |
-| MySQL      | localhost:**3307**       |
+| MySQL      | localhost:**3307** (override with `MYSQL_HOST_PORT` if busy) |
 | NATS       | **4223** (client), **8224** (monitor) |
 
-If **8090**, **4223**, or **8224** are already in use on the host, set env vars when running Compose (Docker still uses internal `nats:4222`). You can add `APP_HOST_PORT`, `NATS_HOST_CLIENT_PORT`, and `NATS_HOST_MONITOR_PORT` to a `.env` file next to `docker-compose.yml`, or pass them inline, e.g.:
+If **8090**, **3307**, **4223**, or **8224** are already in use on the host, set env vars when running Compose (containers still talk to `mysql:3306` and `nats:4222` internally). Example:
 
-`APP_HOST_PORT=18091 docker compose up -d`  
-then `docker compose up -d --force-recreate app` so `APP_URL` matches.
+- `APP_HOST_PORT`, `MYSQL_HOST_PORT`, `NATS_HOST_CLIENT_PORT`, `NATS_HOST_MONITOR_PORT` in a `.env` next to `docker-compose.yml`, or pass inline, e.g.  
+  `MYSQL_HOST_PORT=3310 APP_HOST_PORT=18090 docker compose up -d`  
+  then `docker compose up -d --force-recreate app` if you changed `APP_HOST_PORT` so `APP_URL` matches.
+
+**Run the project:**
 
 ```bash
-# Install dependencies (laravel-nats ^1.4 from Packagist)
 composer install
 
-# Use MySQL in Docker: copy Docker env so the app uses MySQL (not SQLite from .env)
+# Point the app at MySQL + NATS used by Compose
 cp .env.docker .env
 # Or merge DB_* and NATS_* from .env.docker into your existing .env
 
 docker compose up -d
 
-# Run migrations and clear config cache
 docker compose exec app php artisan config:clear
 docker compose exec app php artisan migrate --force
+```
+
+Optional checks (laravel-nats v1.5+):
+
+```bash
+docker compose exec app php artisan nats:v2:config:validate
+docker compose exec app php artisan nats:ping --json
 ```
 
 Containers started:
@@ -105,7 +126,7 @@ Containers started:
 - **nats-v2-listen** - `nats:v2:listen "chat.room.*.message"` (v2 subscriber stack / basis client)
 - **rpc-responder** - `nats:consume "user.rpc.preferences"` with `UserPreferencesRpcHandler`
 - **analytics** - JetStream durable consumer (analytics worker)
-- **mysql** - MySQL on host port 3307
+- **mysql** - MySQL on host port **3307** (or `MYSQL_HOST_PORT`)
 - **phpmyadmin** - http://localhost:8091 (server: `mysql`, user: `nats_chat`, password: `secret`)
 - **nats** - NATS + JetStream on 4223 / 8224
 
@@ -122,6 +143,8 @@ From the UI you can: create rooms, send messages, schedule delayed messages, vie
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | GET | `/api/health` | Liveness: `status`, `nats_v2_reachable` (`NatsV2::ping`) |
+| GET | `/api/nats/v2/smoke` | Package version, ping, multi-value header publish (v1.5 demo) |
+| POST | `/api/nats/v2/rpc/preferences` | `NatsV2::request` to `user.rpc.preferences`: `{ "user_id": 1 }` |
 | GET | `/api/rooms` | List rooms |
 | POST | `/api/rooms` | Create room `{ "name": "General" }` |
 | POST | `/api/rooms/{id}/message` | Send message `{ "user_id": 1, "content": "Hello" }` |
@@ -137,6 +160,7 @@ From the UI you can: create rooms, send messages, schedule delayed messages, vie
 
 - `php artisan nats:work` - NATS queue worker (legacy `nats` driver)
 - `php artisan nats:ping` - v2 basis connection ping (CLI health check)
+- `php artisan nats:v2:config:validate` - validate `nats_basis` config (v1.5+)
 - `php artisan nats:v2:listen "{subject}"` - v2 subscriber loop (envelope-aware)
 - `php artisan nats:consume "{subject}" --handler=ClassName` - Subject consumer with handler
 
@@ -171,8 +195,8 @@ From the UI you can: create rooms, send messages, schedule delayed messages, vie
 ## Testing
 
 - **Manual (API):** See **[docs/TESTING.md](docs/TESTING.md)** for curl examples and demo scenarios (happy path, failed jobs, delayed messages).
-- **Quick script:** `./test-manual.sh` (or `BASE_URL=http://localhost:8090 ./test-manual.sh`).
-- **Automated:** `composer test` or `docker compose exec app php artisan test` (requires PHP with pdo_sqlite).
+- **Quick curl script:** `./test-manual.sh` (or `BASE_URL=http://localhost:8090 ./test-manual.sh`).
+- **Automated:** `composer test` or `docker compose exec app php artisan test` (requires PHP with **pdo_sqlite** on the host; Docker image includes it).
 
 ## Documentation
 
@@ -181,6 +205,8 @@ From the UI you can: create rooms, send messages, schedule delayed messages, vie
 - **[docs/TESTING.md](docs/TESTING.md)** - Manual and automated testing.
 
 ## Local Setup (No Docker)
+
+Requires **PHP 8.2+**, **Laravel 12**, and **pdo_sqlite** (for tests) or MySQL.
 
 1. NATS with JetStream: `nats-server -js -m 8222`
 2. `composer install`, copy `.env.example` to `.env`, set `QUEUE_CONNECTION=nats`, `NATS_HOST=127.0.0.1`, `NATS_QUEUE_DELAYED_ENABLED=true`

@@ -118,6 +118,8 @@ docker compose exec app php artisan test
 - **AnalyticsApiTest:** get analytics for room (without/with analytic record, 404 for missing room).
 - **DlqApiTest:** GET /api/dlq (empty list and with failed messages; response includes `error_message`, `attempts`).
 - **MetricsApiTest:** GET /api/metrics returns structure (`total_messages`, `processed_messages`, `failed_messages`, `retries`, `avg_processing_time`).
+- **HealthApiTest:** GET /api/health (`status`, `nats_v2_reachable`).
+- **NatsV2FeaturesApiTest:** GET /api/nats/v2/smoke (package version, ping, multi-header publish flags).
 
 ---
 

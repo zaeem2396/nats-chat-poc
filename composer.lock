@@ -4,20 +4,20 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "4639d8335d2a75cc2f6af7f38df5be1b",
+    "content-hash": "86f385f051610b105b9e3246381d62eb",
     "packages": [
         {
             "name": "basis-company/nats",
-            "version": "1.2.0",
+            "version": "1.2.1",
             "source": {
                 "type": "git",
                 "url": "https://github.com/basis-company/nats.php.git",
-                "reference": "6281d8c6b7ea7419bcb29723bb117536b423da47"
+                "reference": "7134854d40b2646ad3c84a0bd0f75b7c96a5a26c"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/basis-company/nats.php/zipball/6281d8c6b7ea7419bcb29723bb117536b423da47",
-                "reference": "6281d8c6b7ea7419bcb29723bb117536b423da47",
+                "url": "https://api.github.com/repos/basis-company/nats.php/zipball/7134854d40b2646ad3c84a0bd0f75b7c96a5a26c",
+                "reference": "7134854d40b2646ad3c84a0bd0f75b7c96a5a26c",
                 "shasum": ""
             },
             "require": {
@@ -68,9 +68,9 @@
             ],
             "support": {
                 "issues": "https://github.com/basis-company/nats.php/issues",
-                "source": "https://github.com/basis-company/nats.php/tree/1.2.0"
+                "source": "https://github.com/basis-company/nats.php/tree/1.2.1"
             },
-            "time": "2026-03-17T22:21:16+00:00"
+            "time": "2026-03-24T12:44:31+00:00"
         },
         {
             "name": "brick/math",
@@ -6076,16 +6076,16 @@
         },
         {
             "name": "zaeem2396/laravel-nats",
-            "version": "v1.4.0",
+            "version": "v1.5.0",
             "source": {
                 "type": "git",
                 "url": "https://github.com/zaeem2396/laravel-nats.git",
-                "reference": "409783e6a54f6c4751299d36a5cddb2b8c949e05"
+                "reference": "6a1f8967d67c0fd0ac33eb397c3905bc32777b36"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/zaeem2396/laravel-nats/zipball/409783e6a54f6c4751299d36a5cddb2b8c949e05",
-                "reference": "409783e6a54f6c4751299d36a5cddb2b8c949e05",
+                "url": "https://api.github.com/repos/zaeem2396/laravel-nats/zipball/6a1f8967d67c0fd0ac33eb397c3905bc32777b36",
+                "reference": "6a1f8967d67c0fd0ac33eb397c3905bc32777b36",
                 "shasum": ""
             },
             "require": {
@@ -6142,9 +6142,9 @@
             ],
             "support": {
                 "issues": "https://github.com/zaeem2396/laravel-nats/issues",
-                "source": "https://github.com/zaeem2396/laravel-nats/tree/v1.4.0"
+                "source": "https://github.com/zaeem2396/laravel-nats/tree/v1.5.0"
             },
-            "time": "2026-03-29T11:25:49+00:00"
+            "time": "2026-03-31T06:53:19+00:00"
         }
     ],
     "packages-dev": [

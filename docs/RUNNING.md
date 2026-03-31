@@ -1,5 +1,16 @@
 # How to Run and Usage
 
+## Requirements
+
+| | |
+|--|--|
+| **PHP** | **8.2+** (`composer.json`; Docker image uses PHP **8.3**) |
+| **Laravel** | **12.x** |
+| **laravel-nats** | **^1.5** ([Packagist](https://packagist.org/packages/zaeem2396/laravel-nats)) |
+| **NATS** | 2.x with **JetStream** (`-js`) for delayed jobs and analytics |
+
+For automated tests on the host, enable **pdo_sqlite**.
+
 ## Quick start (Docker)
 
 ```bash
@@ -11,13 +22,20 @@ composer install
 cp .env.docker .env
 # Or: merge DB_* and NATS_* from .env.docker into your .env
 
-# 3. Start all services
+# 3. Start all services (if host port 3307 is busy: MYSQL_HOST_PORT=3310 docker compose up -d)
 docker compose up -d
 
 # 4. Migrate and (optional) bootstrap DLQ stream
 docker compose exec app php artisan config:clear
 docker compose exec app php artisan migrate --force
 docker compose exec app php artisan nats-chat:dlq-bootstrap
+```
+
+Optional (laravel-nats **v1.5+**):
+
+```bash
+docker compose exec app php artisan nats:v2:config:validate
+docker compose exec app php artisan nats:ping --json
 ```
 
 **Services:**
@@ -30,7 +48,7 @@ docker compose exec app php artisan nats-chat:dlq-bootstrap
 | **moderation** | Subscribes to `chat.room.*.message`, dispatches jobs |
 | **rpc-responder** | Replies to `user.rpc.preferences` |
 | **analytics** | JetStream consumer for chat stream |
-| **mysql** | Database (host port 3307) |
+| **mysql** | Database (host port **3307**, or `MYSQL_HOST_PORT`) |
 | **phpmyadmin** | http://localhost:8091 |
 | **nats** | NATS + JetStream (client 4223, monitor 8224) |
 
@@ -53,6 +71,9 @@ Base URL: **http://localhost:8090/api**
 
 | Method | Endpoint | Body (JSON) |
 |--------|----------|--------------|
+| GET | `/health` | - (`status`, `nats_v2_reachable`) |
+| GET | `/nats/v2/smoke` | - (package version, ping, multi-header publish demo) |
+| POST | `/nats/v2/rpc/preferences` | `{ "user_id": 1 }` (`NatsV2::request` vs RPC responder) |
 | GET | `/rooms` | - |
 | POST | `/rooms` | `{ "name": "General" }` |
 | POST | `/rooms/{id}/message` | `{ "user_id": 1, "content": "Hello" }` |
@@ -92,6 +113,8 @@ curl -s http://localhost:8090/api/metrics
 
 | Command | Description |
 |---------|-------------|
+| `nats:v2:config:validate` | Validate `nats_basis` config (v1.5+) |
+| `nats:ping [--json]` | v2 basis connection ping |
 | `nats:work --tries=3 --sleep=1 --queue=default` | Process NATS queue jobs |
 | `nats:consume "chat.room.*.message" --handler=App\Handlers\ModerationMessageHandler` | Moderation subscriber |
 | `nats:consume "user.rpc.preferences" --handler=App\Handlers\UserPreferencesRpcHandler` | RPC responder |
