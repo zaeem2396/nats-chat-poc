@@ -2,10 +2,11 @@
 
 namespace App\Consumers;
 
+use App\Logging\PipelineLog;
 use App\Services\NotificationService;
+use App\Support\JetStreamAckMeta;
 use App\Support\OrderPipelineEventParser;
 use Basis\Nats\Message\Msg;
-use Illuminate\Support\Facades\Log;
 
 /**
  * Durable consumer on payments.completed + payments.failed — persisted notifications + logs.
@@ -20,11 +21,18 @@ final class NotificationConsumer
     {
         $parsed = OrderPipelineEventParser::parse($msg);
         if ($parsed === null) {
-            Log::error('order_pipeline.notifications_worker.invalid_envelope');
+            PipelineLog::error('NotificationsWorker', 'Invalid envelope — TERM', ['subject' => $msg->subject]);
             $msg->term('invalid_envelope');
 
             return;
         }
+
+        PipelineLog::info('NotificationsWorker', 'Message received', [
+            'message_id' => $parsed['id'],
+            'type' => $parsed['type'],
+            'subject' => $msg->subject,
+            'jetstream_attempt' => JetStreamAckMeta::deliveryAttempt($msg),
+        ]);
 
         $this->notificationService->handlePaymentEvent($msg, $parsed);
     }

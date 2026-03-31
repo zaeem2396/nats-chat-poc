@@ -2,10 +2,10 @@
 
 namespace App\Services;
 
+use App\Logging\PipelineLog;
 use App\Models\OrderNotification;
 use Basis\Nats\Message\Msg;
 use Illuminate\Support\Facades\Cache;
-use Illuminate\Support\Facades\Log;
 
 final class NotificationService
 {
@@ -21,11 +21,20 @@ final class NotificationService
 
         $idem = 'order_notify:'.$type.':'.$eventId;
         if (Cache::has($idem)) {
-            Log::info('order_pipeline.notify.duplicate_skip', ['type' => $type, 'event_id' => $eventId]);
+            PipelineLog::info('NotificationService', 'Duplicate — ACK (idempotency)', [
+                'message_id' => $eventId,
+                'type' => $type,
+            ]);
             $msg->ack();
 
             return;
         }
+
+        PipelineLog::info('NotificationService', 'Processing started', [
+            'message_id' => $eventId,
+            'type' => $type,
+            'order_id' => $orderId,
+        ]);
 
         OrderNotification::query()->create([
             'event_type' => $type,
@@ -33,13 +42,13 @@ final class NotificationService
             'payload' => $data,
         ]);
 
-        Log::info('order_pipeline.notify.stored', [
+        Cache::put($idem, true, (int) config('nats_orders.idempotency_ttl_seconds', 86400));
+
+        PipelineLog::info('NotificationService', 'Successfully processed', [
+            'message_id' => $eventId,
             'type' => $type,
             'order_id' => $orderId,
-            'event_id' => $eventId,
         ]);
-
-        Cache::put($idem, true, (int) config('nats_orders.idempotency_ttl_seconds', 86400));
 
         $msg->ack();
     }

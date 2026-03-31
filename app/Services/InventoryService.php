@@ -2,10 +2,11 @@
 
 namespace App\Services;
 
+use App\Logging\PipelineLog;
 use App\Models\InventoryItem;
+use App\Support\JetStreamAckMeta;
 use Basis\Nats\Message\Msg;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Log;
 use LaravelNats\Laravel\Facades\NatsV2;
 
 final class InventoryService
@@ -26,25 +27,35 @@ final class InventoryService
         $eventId = $envelope['id'];
         $stream = (string) config('nats_orders.stream_name', 'ORDERS');
         $consumer = (string) config('nats_orders.consumers.inventory.durable_name', 'svc_inventory_payments_completed');
+        $attempt = JetStreamAckMeta::deliveryAttempt($msg);
+        $maxDeliver = JetStreamAckMeta::maxDeliverForConsumer('inventory');
 
-        Log::info('order_pipeline.inventory.received', [
+        PipelineLog::info('InventoryService', 'Message received', [
+            'message_id' => $eventId,
+            'subject' => $msg->subject,
             'order_id' => $orderId,
-            'sku' => $sku,
-            'quantity' => $qty,
-            'event_id' => $eventId,
+            'jetstream_attempt' => $attempt,
+            'jetstream_max_deliver' => $maxDeliver,
         ]);
 
         if ($sku === '' || $qty < 1) {
+            PipelineLog::error('InventoryService', 'Invalid sku/qty — DLQ', ['message_id' => $eventId]);
             $this->dlq->moveToDlq(
                 $msg,
                 (string) config('nats_orders.subjects.inventory_dlq', 'inventory.dlq'),
                 $consumer,
                 'Invalid sku or quantity',
-                1,
+                $attempt,
             );
 
             return;
         }
+
+        PipelineLog::info('InventoryService', 'Processing started', [
+            'message_id' => $eventId,
+            'sku' => $sku,
+            'quantity' => $qty,
+        ]);
 
         $deducted = DB::transaction(function () use ($sku, $qty, $orderId, $stream): bool {
             /** @var InventoryItem|null $row */
@@ -73,13 +84,39 @@ final class InventoryService
         });
 
         if (! $deducted) {
-            Log::warning('order_pipeline.inventory.insufficient_stock_nack', ['sku' => $sku, 'qty' => $qty]);
-            $msg->nack(2.0);
+            if ($attempt >= $maxDeliver) {
+                PipelineLog::warning('InventoryService', 'Insufficient stock after max JetStream deliveries → DLQ', [
+                    'message_id' => $eventId,
+                    'sku' => $sku,
+                    'jetstream_attempt' => $attempt,
+                ]);
+                $this->dlq->moveToDlq(
+                    $msg,
+                    (string) config('nats_orders.subjects.inventory_dlq', 'inventory.dlq'),
+                    $consumer,
+                    'Insufficient stock after max_deliver',
+                    $attempt,
+                );
+
+                return;
+            }
+
+            $delay = (float) config('nats_orders.nack_delay_seconds', 2.0);
+            PipelineLog::warning('InventoryService', "Insufficient stock → retry {$attempt}/{$maxDeliver} (NAK)", [
+                'message_id' => $eventId,
+                'sku' => $sku,
+                'qty' => $qty,
+            ]);
+            $msg->nack($delay);
 
             return;
         }
 
-        Log::info('order_pipeline.inventory.processed', ['order_id' => $orderId, 'sku' => $sku]);
+        PipelineLog::info('InventoryService', 'Successfully processed', [
+            'message_id' => $eventId,
+            'order_id' => $orderId,
+            'sku' => $sku,
+        ]);
         $msg->ack();
     }
 }
