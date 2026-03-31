@@ -1,13 +1,20 @@
-# nats-chat-poc: Laravel app + NATS (JetStream) + MySQL + phpMyAdmin + workers
-# Ports: app 8090, MySQL ${MYSQL_HOST_PORT:-3307}, NATS 4223/8224, phpMyAdmin 8091 — set MYSQL_HOST_PORT if 3307 is busy
-# Run: docker compose up -d && docker compose exec app php artisan migrate --force
+# Distributed order pipeline PoC: Laravel + NATS JetStream + MySQL
+# Ports: app 8090, MySQL ${MYSQL_HOST_PORT:-3307}, NATS 4223/8224, phpMyAdmin 8091
+#
+# Setup:
+#   docker compose up -d
+#   docker compose exec app php artisan migrate --force
+#   docker compose exec app php artisan nats:orders:provision-stream
+#
+# Workers (each is a durable JetStream pull consumer with explicit ACK/NACK):
+#   orders-worker, payments-worker, inventory-worker, notifications-worker
 
 services:
   app:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: nats-chat-app
+    container_name: nats-orders-app
     restart: unless-stopped
     working_dir: /var/www
     volumes:
@@ -25,9 +32,7 @@ services:
       - DB_PASSWORD=secret
       - NATS_HOST=nats
       - NATS_PORT=4222
-      - QUEUE_CONNECTION=nats
-      - NATS_QUEUE_DELAYED_ENABLED=true
-      - NATS_ANALYTICS_HOST=nats
+      - QUEUE_CONNECTION=sync
     depends_on:
       mysql:
         condition: service_healthy
@@ -43,11 +48,11 @@ services:
       start_period: 10s
     command: php artisan serve --host=0.0.0.0 --port=8000
 
-  queue:
+  orders-worker:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: nats-chat-queue
+    container_name: nats-orders-worker
     restart: unless-stopped
     working_dir: /var/www
     volumes:
@@ -61,19 +66,17 @@ services:
       - DB_PASSWORD=secret
       - NATS_HOST=nats
       - NATS_PORT=4222
-      - QUEUE_CONNECTION=nats
-      - NATS_QUEUE=default
-      - NATS_QUEUE_DELAYED_ENABLED=true
+      - QUEUE_CONNECTION=sync
     depends_on:
       - app
       - nats
-    command: php artisan nats:work --tries=3 --sleep=1 --queue=default
+    command: php artisan nats:orders-worker
 
-  queue-2:
+  payments-worker:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: nats-chat-queue-2
+    container_name: nats-payments-worker
     restart: unless-stopped
     working_dir: /var/www
     volumes:
@@ -87,19 +90,17 @@ services:
       - DB_PASSWORD=secret
       - NATS_HOST=nats
       - NATS_PORT=4222
-      - QUEUE_CONNECTION=nats
-      - NATS_QUEUE=default
-      - NATS_QUEUE_DELAYED_ENABLED=true
+      - QUEUE_CONNECTION=sync
     depends_on:
       - app
       - nats
-    command: php artisan nats:work --tries=3 --sleep=1 --queue=default
+    command: php artisan nats:payments-worker
 
-  moderation:
+  inventory-worker:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: nats-chat-moderation
+    container_name: nats-inventory-worker
     restart: unless-stopped
     working_dir: /var/www
     volumes:
@@ -113,55 +114,17 @@ services:
       - DB_PASSWORD=secret
       - NATS_HOST=nats
       - NATS_PORT=4222
-      - QUEUE_CONNECTION=nats
+      - QUEUE_CONNECTION=sync
     depends_on:
       - app
       - nats
-    command: php artisan nats:consume "chat.room.*.message" --handler=App\\Handlers\\ModerationMessageHandler
+    command: php artisan nats:inventory-worker
 
-  rpc-responder:
+  notifications-worker:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: nats-chat-rpc
-    restart: unless-stopped
-    working_dir: /var/www
-    volumes:
-      - .:/var/www
-    environment:
-      - APP_ENV=local
-      - NATS_HOST=nats
-      - NATS_PORT=4222
-    depends_on:
-      - app
-      - nats
-    command: php artisan nats:consume "user.rpc.preferences" --handler=App\\Handlers\\UserPreferencesRpcHandler
-
-  # v2.1 basis-company/nats subscriber stack (same subjects as moderation; core pub/sub delivers a copy to each non-queue subscriber)
-  nats-v2-listen:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    container_name: nats-chat-nats-v2
-    restart: unless-stopped
-    working_dir: /var/www
-    volumes:
-      - .:/var/www
-    environment:
-      - APP_ENV=local
-      - NATS_HOST=nats
-      - NATS_PORT=4222
-      - LOG_CHANNEL=stderr
-    depends_on:
-      - app
-      - nats
-    command: php artisan nats:v2:listen "chat.room.*.message" --timeout=2
-
-  analytics:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    container_name: nats-chat-analytics
+    container_name: nats-notifications-worker
     restart: unless-stopped
     working_dir: /var/www
     volumes:
@@ -174,17 +137,16 @@ services:
       - DB_USERNAME=nats_chat
       - DB_PASSWORD=secret
       - NATS_HOST=nats
-      - NATS_ANALYTICS_HOST=nats
       - NATS_PORT=4222
-      - QUEUE_CONNECTION=nats
+      - QUEUE_CONNECTION=sync
     depends_on:
       - app
       - nats
-    command: php artisan nats-chat:analytics-worker --connection=analytics
+    command: php artisan nats:notifications-worker
 
   mysql:
     image: mysql:8.0
-    container_name: nats-chat-mysql
+    container_name: nats-orders-mysql
     restart: unless-stopped
     environment:
       MYSQL_DATABASE: nats_chat
@@ -203,7 +165,7 @@ services:
 
   phpmyadmin:
     image: phpmyadmin:latest
-    container_name: nats-chat-phpmyadmin
+    container_name: nats-orders-phpmyadmin
     restart: unless-stopped
     environment:
       PMA_HOST: mysql
@@ -219,7 +181,7 @@ services:
 
   nats:
     image: nats:2.10-alpine
-    container_name: nats-chat-nats
+    container_name: nats-orders-nats
     restart: unless-stopped
     command: ["-js", "-m", "8222"]
     ports:

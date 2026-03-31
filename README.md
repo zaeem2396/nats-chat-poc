@@ -1,224 +1,187 @@
-# NATS Chat PoC
+# Laravel + NATS JetStream — Distributed Order Pipeline (Production-Style PoC)
 
-Production-style Laravel chat backend demonstrating the **[zaeem2396/laravel-nats](https://github.com/zaeem2396/laravel-nats)** package: Pub/Sub, RPC, JetStream, queue driver, DLQ, metrics, and multi-worker scaling.
+This repository is a **production-grade proof of concept**: a **multi-stage, event-driven order system** in a **single Laravel codebase**, wired like **separate microservices** through **NATS JetStream** and **[zaeem2396/laravel-nats](https://github.com/zaeem2396/laravel-nats)** (built on **[basis-company/nats.php](https://github.com/basis-company/nats.php)**).
 
-## Architecture Overview
+It is **not** a toy chat demo. It demonstrates **durable consumers**, **explicit ACK / NACK**, **retry semantics**, **dead-letter handling with DB audit**, **idempotency**, **structured envelopes**, and **config-driven subjects** — patterns you would expect when explaining NATS to operators or maintainers.
 
-- **API** receives send/schedule → persists message and publishes to `chat.room.{id}.message`.
-- **Moderation** (`nats:consume` wildcard) and **JetStream** stream both receive messages; moderation dispatches queue jobs (moderation, notification); analytics worker pulls from stream and dispatches analytics job.
-- **Queue workers** (`nats:work`) process jobs; failed jobs go to **DLQ** (`chat.dlq`) and can be stored in `failed_messages` via `nats-chat:dlq-store`.
-- **Metrics** (processed/failed/retries/avg time) are exposed at `GET /api/metrics`.
+---
 
-See **[docs/DOCUMENTATION.md](docs/DOCUMENTATION.md)** for a full diagram and data flow.
+## Architecture (logical microservices in one app)
 
-## What This PoC Demonstrates
+| Logical service        | Responsibility |
+|------------------------|----------------|
+| **Order**              | HTTP `POST /api/orders` → persist `orders` row → **JetStream publish** `orders.created` (sync server ack). |
+| **Orders worker**      | Durable pull consumer on `orders.created` → ingress: set `pipeline_stage`, **idempotent** duplicate handling, **ACK**. |
+| **Payments worker**    | Durable pull consumer on `orders.created` → simulate PSP: **NACK** on transient failure (retry), **ACK** + publish `payments.completed` or `payments.failed`. |
+| **Inventory worker**   | Durable pull consumer on `payments.completed` → deduct stock → publish `inventory.updated`, **NACK** if insufficient stock (retry). |
+| **Notifications worker** | Durable pull consumer on `payments.completed` **and** `payments.failed` (multi-filter) → persist `order_notifications`, **idempotent** by event id, **ACK**. |
 
-- **Publish/Subscribe** - Chat messages published to NATS subjects; subscribers for moderation and analytics
-- **Wildcards** - Single-level (`chat.room.*.message`) and multi-level (`chat.room.>`) subscriptions
-- **Request/Reply (RPC)** - User preferences via `user.rpc.preferences`
-- **NATS as Laravel queue driver** - Jobs processed with `nats:work` (retries, backoff, failed jobs)
-- **JetStream** - Streams, durable consumers, pull consumption, acknowledgements
-- **Delayed jobs** - Scheduled messages via JetStream delayed queue
-- **Multiple NATS connections** - Default + analytics connection
-- **Package Artisan commands** - `nats:work`, `nats:consume` with handler classes
-- **DLQ** - Failed jobs published to `chat.dlq`, stored in DB, `GET /api/dlq`
-- **Metrics** - `GET /api/metrics` (processed, failed, retries, avg processing time)
-- **v2 envelope (basis-company/nats)** - `NatsV2::publish` adds `{ id, type: <subject>, version, data }`; `nats-v2-listen` container prints JSON lines; consumers use `EventPayload::unwrap()` for flat `data`; idempotency via `message_id`
-- **Multi-worker** - Two queue workers in Docker (same queue = load balanced)
+All inter-service traffic is **JetStream** (persisted, replayable), not Laravel queues.
 
-## Feature Mapping (laravel-nats vs this project)
+---
 
-| laravel-nats feature | This project |
-|----------------------|--------------|
-| `NatsV2::publish` (v2 envelope) | ChatMessageService publishes to `chat.room.{id}.message` |
-| `nats:v2:listen` | **nats-v2-listen** container (same wildcard as moderation; demo of basis subscriber) |
-| `nats:consume` + handler | ModerationMessageHandler, UserPreferencesRpcHandler |
-| `nats:work` (queue) | queue + queue-2 containers; ModerateMessageJob, SendNotificationJob, ProcessAnalyticsJob |
-| JetStream stream/consumer | ChatStreamBootstrap (chat-stream), DlqStreamBootstrap (dlq), analytics-worker |
-| Delayed jobs (JetStream) | Schedule message endpoint |
-| Request/reply | SendNotificationJob → `user.rpc.preferences` → UserPreferencesRpcHandler |
-| Dead letter queue | `chat.dlq` → failed_messages table, `GET /api/dlq` |
-| `nats_basis` queue driver (v1.4+) | Optional `QUEUE_CONNECTION=nats_basis` in `.env` (see `config/queue.php`) |
-| `NatsV2::ping` / `php artisan nats:ping` | `GET /api/health` → `nats_v2_reachable` |
-| v1.5: multi-header publish + `NatsV2::request` | `GET /api/nats/v2/smoke`, `POST /api/nats/v2/rpc/preferences` |
-| `nats:v2:config:validate` | Run in CLI: `docker compose exec app php artisan nats:v2:config:validate` |
+## Event flow (text diagram)
 
-## Failure Scenarios
+```
+[Client] --POST /orders--> [Order API + DB]
+                              |
+                              | NatsV2::jetStreamPublish (ORDERS stream, subject orders.created)
+                              v
+                    +-------------------+
+                    | JetStream ORDERS  |
+                    | orders.*          |
+                    | payments.*        |
+                    | inventory.*       |
+                    +-------------------+
+                         |          |
+            orders.created          |
+                    +-----+----+     |
+                    |     |    |     |
+                    v     v    |     |
+            [Orders worker] [Payments worker]
+                    |            |
+                    |            +-- NACK (transient) ---> retry (same consumer)
+                    |            +-- ACK + publish payments.completed / payments.failed
+                    |                              |
+                    |                              v
+                    |                    +------------------+
+                    |                    | notifications.*  |
+                    |                    | (via filters)    |
+                    |                    +------------------+
+                    |                         ^        ^
+                    |                         |        |
+                    +-------------------------+    [Notifications worker]
+                    |
+            payments.completed
+                    |
+                    v
+            [Inventory worker] --ACK--> publish inventory.updated
 
-- **Retries:** Jobs use `tries=3` and `backoff`; JetStream consumer has `ack_wait` and `max_deliver` (config: `NATS_JETSTREAM_ACK_WAIT`, `NATS_JETSTREAM_MAX_DELIVER`).
-- **DLQ:** After max retries, job is published to `chat.dlq`. Run `nats-chat:dlq-store` to persist to `failed_messages`; list via `GET /api/dlq`.
-- **Worker crash:** Queue jobs are re-delivered by NATS when a worker dies; JetStream consumer resumes from last ack on restart.
+DLQ path (payments example):
+  Max app-level attempts exceeded or poison message
+    --> term() on JetStream msg
+    --> publish wrapped payload to payments.dlq (still under ORDERS stream)
+    --> insert row in failed_messages
+```
 
-## Scaling
+---
 
-- **Multiple workers:** Docker runs two `nats:work` containers (queue, queue-2) on the same queue name `default`. NATS distributes messages between them (queue group).
-- **Add more:** Add more services in `docker-compose.yml` with the same `command: php artisan nats:work --queue=default`.
+## Why this is production-relevant
 
-## Why NATS (vs Redis / Kafka)
+1. **JetStream** gives you **at-least-once delivery**, **replay**, and **consumer lag** visibility — the same primitives used in real event backbones.
+2. **Durable consumers** survive process restarts; cursors live on the server.
+3. **Explicit ACK / NACK** models success vs “try again” without silently dropping work.
+4. **max_deliver** + **ack_wait** on consumers (see `config/nats_orders.php`) bound redelivery and stuck-work behavior.
+5. **DLQ + `failed_messages`** gives operators an **audit trail** and a subject (`*.dlq`) for tooling/alerting.
+6. **Idempotency** (cache keys per envelope id / consumer) shows how to handle **duplicate deliveries** safely.
 
-- **NATS:** Lightweight, at-most-once or JetStream for persistence, low latency, easy to run. Good for event-driven apps and queues at moderate scale.
-- **Redis (queues):** Simple, in-memory; no built-in replay or durable log.
-- **Kafka:** Durable log, high throughput; heavier ops and resource use. Prefer NATS when you want persistence and ordering without Kafka’s complexity.
+---
 
-## Requirements
+## NATS usage in this PoC
 
-| Component | Version |
-|-----------|---------|
-| **PHP** | **8.2+** (see `composer.json`; the Docker image uses **PHP 8.3**) |
-| **Laravel** | **12.x** (`laravel/framework` ^12.0) |
-| **laravel-nats** | **^1.5** ([Packagist](https://packagist.org/packages/zaeem2396/laravel-nats)) |
-| **NATS Server** | 2.x with JetStream enabled for delayed jobs and analytics |
+| Mechanism | Where |
+|-----------|--------|
+| Stream **ORDERS** | Subjects `orders.*`, `payments.*`, `inventory.*` (includes `*.dlq`). |
+| Publish | `NatsV2::jetStreamPublish()` — JSON envelope `{ id, type, version, data, idempotency_key? }` from **laravel-nats** (type mirrors subject, e.g. `orders.created`). |
+| Pull consumers | `NatsV2::jetStreamPull()` in a long loop (`app/Services/Nats/JetStreamOrderWorkerLoop.php`). |
+| Consumer creation | `OrderStreamConsumerProvisioner` sets **filter_subject** / **filter_subjects**, **explicit ack**, **ack_wait**, **max_deliver**. |
+| ACK / NACK / term | `Basis\Nats\Message\Msg` — `ack()`, `nack(delay)`, `term(reason)`. |
 
-For automated tests on the host, the **pdo_sqlite** PHP extension is required.
+---
 
-## Tech Stack
+## Configuration
 
-- **Laravel 12**, **PHP 8.2+**
-- **zaeem2396/laravel-nats** ^1.5
-- **NATS Server** with JetStream
-- **MySQL 8** (Docker) or SQLite (local / PHPUnit)
-- **phpMyAdmin** (Docker) for database access
+- **`config/nats_orders.php`** — stream name, subjects, durable consumer names, retry/DLQ tuning, pull batch/expiry.
+- **`config/nats_basis.php`** — merged from the package; preset `order_processing` is **injected at boot** via `OrderMessagingServiceProvider`.
 
-## Quick Start (Docker)
+Environment highlights (see `.env.example`):
 
-Ports are set to avoid clashes with other projects:
+- `NATS_HOST`, `NATS_PORT` — broker for **NatsV2** / JetStream.
+- `NATS_ORDER_MAX_ATTEMPTS` — app-level payment attempts before DLQ.
+- `NATS_PAYMENT_TRANSIENT_FAIL_PERCENT`, `NATS_PAYMENT_TERMINAL_FAIL_PERCENT` — simulation knobs.
 
-| Service     | URL / Port              |
-|------------|--------------------------|
-| Laravel API| http://localhost:**8090** |
-| phpMyAdmin | http://localhost:**8091** |
-| MySQL      | localhost:**3307** (override with `MYSQL_HOST_PORT` if busy) |
-| NATS       | **4223** (client), **8224** (monitor) |
+---
 
-If **8090**, **3307**, **4223**, or **8224** are already in use on the host, set env vars when running Compose (containers still talk to `mysql:3306` and `nats:4222` internally). Example:
+## Step-by-step setup (Docker)
 
-- `APP_HOST_PORT`, `MYSQL_HOST_PORT`, `NATS_HOST_CLIENT_PORT`, `NATS_HOST_MONITOR_PORT` in a `.env` next to `docker-compose.yml`, or pass inline, e.g.  
-  `MYSQL_HOST_PORT=3310 APP_HOST_PORT=18090 docker compose up -d`  
-  then `docker compose up -d --force-recreate app` if you changed `APP_HOST_PORT` so `APP_URL` matches.
-
-**Run the project:**
+**Prerequisites:** Docker Compose, ports **8090** (app), **3307** (MySQL), **4223/8224** (NATS client/monitor) free (or override with env vars in compose).
 
 ```bash
-composer install
+cp .env.example .env   # ensure DB_* and NATS_* match docker-compose
+docker compose up -d --build
 
-# Point the app at MySQL + NATS used by Compose
-cp .env.docker .env
-# Or merge DB_* and NATS_* from .env.docker into your existing .env
-
-docker compose up -d
-
-docker compose exec app php artisan config:clear
+docker compose exec app php artisan key:generate --force
 docker compose exec app php artisan migrate --force
+docker compose exec app php artisan nats:orders:provision-stream
 ```
 
-Optional checks (laravel-nats v1.5+):
+**Workers** (Compose services):
+
+- `orders-worker` → `php artisan nats:orders-worker`
+- `payments-worker` → `php artisan nats:payments-worker`
+- `inventory-worker` → `php artisan nats:inventory-worker`
+- `notifications-worker` → `php artisan nats:notifications-worker`
+
+**Smoke test**
 
 ```bash
-docker compose exec app php artisan nats:v2:config:validate
-docker compose exec app php artisan nats:ping --json
+curl -sS -X POST http://localhost:8090/api/orders \
+  -H "Content-Type: application/json" \
+  -d '{"user_id":1,"sku":"SKU-DEMO","quantity":2,"total_cents":1999}'
+
+curl -sS http://localhost:8090/api/orders
+curl -sS http://localhost:8090/api/metrics
+curl -sS http://localhost:8090/api/dlq
 ```
 
-Containers started:
+Watch logs: `docker compose logs -f payments-worker` (transient **NACK** / retries), `notifications-worker` (completed/failed), `inventory-worker` (stock).
 
-- **app** - Laravel (default host port **8090**, or `APP_HOST_PORT` if set)
-- **queue**, **queue-2** - `php artisan nats:work` (same queue = load balanced)
-- **moderation** - `nats:consume "chat.room.*.message"` with `ModerationMessageHandler`
-- **nats-v2-listen** - `nats:v2:listen "chat.room.*.message"` (v2 subscriber stack / basis client)
-- **rpc-responder** - `nats:consume "user.rpc.preferences"` with `UserPreferencesRpcHandler`
-- **analytics** - JetStream durable consumer (analytics worker)
-- **mysql** - MySQL on host port **3307** (or `MYSQL_HOST_PORT`)
-- **phpmyadmin** - http://localhost:8091 (server: `mysql`, user: `nats_chat`, password: `secret`)
-- **nats** - NATS + JetStream on 4223 / 8224
+**CLI health**
 
-**How to run and usage:** See **[docs/RUNNING.md](docs/RUNNING.md)** for step-by-step run, API usage, and all Artisan commands.
+```bash
+docker compose exec app php artisan nats:ping
+docker compose exec app php artisan nats:v2:jetstream:streams
+```
 
-### Try It
+---
 
-Open **http://localhost:8090** (or your `APP_HOST_PORT` if you changed it). You should see the **chat** UI.
+## HTTP API
 
-From the UI you can: create rooms, send messages, schedule delayed messages, view history and analytics, and trigger the fail-test message (for failed jobs demo). No curl needed.
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/health` | App + `NatsV2::ping` |
+| POST | `/api/orders` | Create order + publish `orders.created` |
+| GET | `/api/orders` | List recent orders |
+| GET | `/api/orders/{id}` | Order + payments |
+| GET | `/api/metrics` | Counts (orders, payments, notifications, DLQ rows) |
+| GET | `/api/dlq` | Paginated `failed_messages` |
 
-## API Endpoints
+---
 
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/api/health` | Liveness: `status`, `nats_v2_reachable` (`NatsV2::ping`) |
-| GET | `/api/nats/v2/smoke` | Package version, ping, multi-value header publish (v1.5 demo) |
-| POST | `/api/nats/v2/rpc/preferences` | `NatsV2::request` to `user.rpc.preferences`: `{ "user_id": 1 }` |
-| GET | `/api/rooms` | List rooms |
-| POST | `/api/rooms` | Create room `{ "name": "General" }` |
-| POST | `/api/rooms/{id}/message` | Send message `{ "user_id": 1, "content": "Hello" }` |
-| POST | `/api/rooms/{id}/schedule` | Schedule message (delayed job) `{ "user_id": 1, "content": "Later", "delay_minutes": 1 }` |
-| GET | `/api/rooms/{id}/history` | Room message history |
-| GET | `/api/analytics/room/{id}` | Room analytics (message_count) |
-| GET | `/api/dlq` | List failed messages (DLQ; includes `error_message`, `attempts`) `?per_page=20` |
-| GET | `/api/metrics` | Metrics: `total_messages`, `processed_messages`, `failed_messages`, `retries`, `avg_processing_time` |
+## Project layout (order pipeline)
 
-## Artisan Commands
+```
+app/Consumers/          # JetStream pull handlers (ACK/NACK/term)
+app/Services/           # OrderService, PaymentService, InventoryService, NotificationService
+app/Services/Nats/      # Provisioner, worker loop, DLQ helper
+app/Support/            # OrderPipelineEventParser
+config/nats_orders.php
+```
 
-### Package (laravel-nats)
-
-- `php artisan nats:work` - NATS queue worker (legacy `nats` driver)
-- `php artisan nats:ping` - v2 basis connection ping (CLI health check)
-- `php artisan nats:v2:config:validate` - validate `nats_basis` config (v1.5+)
-- `php artisan nats:v2:listen "{subject}"` - v2 subscriber loop (envelope-aware)
-- `php artisan nats:consume "{subject}" --handler=ClassName` - Subject consumer with handler
-
-### This project
-
-- `php artisan nats-chat:analytics-worker` - JetStream durable consumer for analytics
-- `php artisan nats-chat:dlq-bootstrap` - Create DLQ stream (run once)
-- `php artisan nats-chat:dlq-store` - Consume DLQ → failed_messages table
-- `php artisan nats-chat:load-test [--count=1000] [--use-http]` - Load test
-- `php artisan nats-chat:failed-jobs` - List failed NATS jobs
-
-## Subject Structure
-
-| Subject | Purpose |
-|--------|---------|
-| `chat.room.{roomId}.message` | Chat message (published on send) |
-| `chat.room.*.message` | Moderation consumer (wildcard) |
-| `chat.room.>` | JetStream stream + analytics |
-| `chat.dlq` | Dead letter queue (failed jobs) |
-| `user.rpc.preferences` | RPC: user notification preferences |
-
-## Demo Guide (Step-by-Step)
-
-1. **Start stack:** `docker compose up -d` then `docker compose exec app php artisan migrate --force`
-2. **Web UI:** Open http://localhost:8090 → create room → send message → Refresh (see history)
-3. **Schedule:** Send a message with delay 1 min → wait → Refresh
-4. **Metrics:** `curl -s http://localhost:8090/api/metrics`
-5. **Fail-test:** In UI click "Send fail-test message" → `docker compose exec app php artisan nats-chat:failed-jobs`
-6. **Load test:** `docker compose exec app php artisan nats-chat:load-test --count=200`
-7. **NATS monitor:** http://localhost:8224 (connections, throughput)
+---
 
 ## Testing
 
-- **Manual (API):** See **[docs/TESTING.md](docs/TESTING.md)** for curl examples and demo scenarios (happy path, failed jobs, delayed messages).
-- **Quick curl script:** `./test-manual.sh` (or `BASE_URL=http://localhost:8090 ./test-manual.sh`).
-- **Automated:** `composer test` or `docker compose exec app php artisan test` (requires PHP with **pdo_sqlite** on the host; Docker image includes it).
+```bash
+composer test
+# or
+php artisan test
+```
 
-## Documentation
+Feature tests mock `nats.v2` for `POST /api/orders` so CI does not require a live broker. Full pipeline validation is intended via Docker + workers + `curl` as above.
 
-- **[docs/RUNNING.md](docs/RUNNING.md)** - How to run (Docker + local), API usage, all Artisan commands.
-- **[docs/DOCUMENTATION.md](docs/DOCUMENTATION.md)** - Architecture, API reference, NATS monitoring, event versioning, config profiles, troubleshooting.
-- **[docs/TESTING.md](docs/TESTING.md)** - Manual and automated testing.
-
-## Local Setup (No Docker)
-
-Requires **PHP 8.2+**, **Laravel 12**, and **pdo_sqlite** (for tests) or MySQL.
-
-1. NATS with JetStream: `nats-server -js -m 8222`
-2. `composer install`, copy `.env.example` to `.env`, set `QUEUE_CONNECTION=nats`, `NATS_HOST=127.0.0.1`, `NATS_QUEUE_DELAYED_ENABLED=true`
-3. Database: `touch database/database.sqlite` (or MySQL), then `php artisan migrate`
-4. Run in separate terminals: `php artisan serve`, `php artisan nats:work`, `php artisan nats:consume "chat.room.*.message" --handler=App\Handlers\ModerationMessageHandler`, `php artisan nats:consume "user.rpc.preferences" --handler=App\Handlers\UserPreferencesRpcHandler`, `php artisan nats-chat:analytics-worker`
-
-## Development
-
-- Tests: `composer test`
-- Code style: `composer format`
-- Static analysis: `composer analyse`
+---
 
 ## License
 
-MIT.
+MIT (same as Laravel skeleton unless otherwise noted).

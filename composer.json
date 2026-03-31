@@ -2,8 +2,8 @@
     "$schema": "https://getcomposer.org/schema.json",
     "name": "laravel/laravel",
     "type": "project",
-    "description": "The skeleton application for the Laravel framework.",
-    "keywords": ["laravel", "framework"],
+    "description": "Laravel NATS JetStream order pipeline PoC (event-driven, durable consumers, DLQ) using zaeem2396/laravel-nats.",
+    "keywords": ["laravel", "nats", "jetstream", "event-driven", "orders"],
     "license": "MIT",
     "require": {
         "php": "^8.2",
