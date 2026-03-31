@@ -5,7 +5,13 @@ declare(strict_types=1);
 /**
  * Order pipeline: JetStream stream, subjects, durable consumers, retry/DLQ tuning.
  *
- * @see README.md — distributed order processing PoC (laravel-nats + basis-company/nats).
+ * JetStream reliability (visible to operators):
+ * - ack_wait_seconds: how long before an unacked message is redelivered.
+ * - max_deliver: max delivery attempts per message; after that the server stops redelivering —
+ *   handlers should move poison messages to DLQ on the final attempt when business logic fails.
+ *
+ * @see README.md section "Failure Handling & Reliability"
+ * @see App\Services\Nats\OrderStreamConsumerProvisioner
  */
 return [
 
@@ -35,46 +41,51 @@ return [
 
     /*
     |--------------------------------------------------------------------------
-    | Durable pull consumers (explicit ack; filter per service)
+    | Durable pull consumers (EXPLICIT ack policy; filter per logical service)
+    |--------------------------------------------------------------------------
+    | Each block is applied in OrderStreamConsumerProvisioner::ensure():
+    |   - AckPolicy::EXPLICIT
+    |   - ack_wait_seconds → nanoseconds for JetStream consumer ack_wait
+    |   - max_deliver     → JetStream max_deliver (hard cap on redeliveries)
     |--------------------------------------------------------------------------
     */
     'consumers' => [
         'orders' => [
             'durable_name' => env('NATS_CONSUMER_ORDERS', 'svc_orders_order_created'),
             'filter_subject' => 'orders.created',
-            'ack_wait_seconds' => (int) env('NATS_CONSUMER_ACK_WAIT', 120),
-            'max_deliver' => (int) env('NATS_CONSUMER_MAX_DELIVER', 10),
+            'ack_wait_seconds' => (int) env('NATS_CONSUMER_ORDERS_ACK_WAIT', env('NATS_CONSUMER_ACK_WAIT', 30)),
+            'max_deliver' => (int) env('NATS_CONSUMER_ORDERS_MAX_DELIVER', env('NATS_CONSUMER_MAX_DELIVER', 5)),
         ],
         'payments' => [
             'durable_name' => env('NATS_CONSUMER_PAYMENTS', 'svc_payments_order_created'),
             'filter_subject' => 'orders.created',
-            'ack_wait_seconds' => (int) env('NATS_CONSUMER_ACK_WAIT', 120),
-            'max_deliver' => (int) env('NATS_CONSUMER_MAX_DELIVER', 10),
+            'ack_wait_seconds' => (int) env('NATS_CONSUMER_PAYMENTS_ACK_WAIT', env('NATS_CONSUMER_ACK_WAIT', 30)),
+            'max_deliver' => (int) env('NATS_CONSUMER_PAYMENTS_MAX_DELIVER', env('NATS_CONSUMER_MAX_DELIVER', 5)),
         ],
         'inventory' => [
             'durable_name' => env('NATS_CONSUMER_INVENTORY', 'svc_inventory_payments_completed'),
             'filter_subject' => 'payments.completed',
-            'ack_wait_seconds' => (int) env('NATS_CONSUMER_ACK_WAIT', 120),
-            'max_deliver' => (int) env('NATS_CONSUMER_MAX_DELIVER', 10),
+            'ack_wait_seconds' => (int) env('NATS_CONSUMER_INVENTORY_ACK_WAIT', env('NATS_CONSUMER_ACK_WAIT', 30)),
+            'max_deliver' => (int) env('NATS_CONSUMER_INVENTORY_MAX_DELIVER', env('NATS_CONSUMER_MAX_DELIVER', 5)),
         ],
         'notifications' => [
             'durable_name' => env('NATS_CONSUMER_NOTIFICATIONS', 'svc_notifications_payments'),
             'filter_subjects' => ['payments.completed', 'payments.failed'],
-            'ack_wait_seconds' => (int) env('NATS_CONSUMER_ACK_WAIT', 120),
-            'max_deliver' => (int) env('NATS_CONSUMER_MAX_DELIVER', 10),
+            'ack_wait_seconds' => (int) env('NATS_CONSUMER_NOTIFICATIONS_ACK_WAIT', env('NATS_CONSUMER_ACK_WAIT', 30)),
+            'max_deliver' => (int) env('NATS_CONSUMER_NOTIFICATIONS_MAX_DELIVER', env('NATS_CONSUMER_MAX_DELIVER', 5)),
         ],
     ],
 
     /*
     |--------------------------------------------------------------------------
-    | Application-level retry before DLQ (counted per JetStream message delivery)
+    | NAK delay (seconds) passed to basis Msg::nack($delay) for transient paths
     |--------------------------------------------------------------------------
     */
-    'max_processing_attempts_before_dlq' => (int) env('NATS_ORDER_MAX_ATTEMPTS', 5),
+    'nack_delay_seconds' => (float) env('NATS_NACK_DELAY_SECONDS', 2.0),
 
     /*
     |--------------------------------------------------------------------------
-    | Payment simulation (transient failure → NACK; terminal → payments.failed)
+    | Payment simulation (transient → exception → NAK; terminal → payments.failed)
     |--------------------------------------------------------------------------
     */
     'payment_transient_fail_percent' => (int) env('NATS_PAYMENT_TRANSIENT_FAIL_PERCENT', 35),
