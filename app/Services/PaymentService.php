@@ -2,12 +2,14 @@
 
 namespace App\Services;
 
+use App\Exceptions\TransientPipelineException;
+use App\Logging\PipelineLog;
 use App\Models\Order;
 use App\Models\Payment;
+use App\Support\JetStreamAckMeta;
 use Basis\Nats\Message\Msg;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Log;
 use LaravelNats\Laravel\Facades\NatsV2;
 
 final class PaymentService
@@ -18,6 +20,8 @@ final class PaymentService
 
     /**
      * @param  array{id: string, type: string, version: string, data: array<string, mixed>}  $envelope
+     *
+     * @throws TransientPipelineException JetStream will redeliver after NAK (until max_deliver).
      */
     public function handleOrderCreated(Msg $msg, array $envelope): void
     {
@@ -26,72 +30,102 @@ final class PaymentService
         $eventId = $envelope['id'];
         $stream = (string) config('nats_orders.stream_name', 'ORDERS');
         $consumer = (string) config('nats_orders.consumers.payments.durable_name', 'svc_payments_order_created');
+        $maxDeliver = JetStreamAckMeta::maxDeliverForConsumer('payments');
+        $attempt = JetStreamAckMeta::deliveryAttempt($msg);
+        $ttl = (int) config('nats_orders.idempotency_ttl_seconds', 86400);
+
+        PipelineLog::info('PaymentService', 'Message received', [
+            'message_id' => $eventId,
+            'subject' => $msg->subject,
+            'order_id' => $orderId,
+            'jetstream_attempt' => $attempt,
+            'jetstream_max_deliver' => $maxDeliver,
+        ]);
 
         if ($orderId < 1) {
+            PipelineLog::error('PaymentService', 'Invalid order_id — sending to DLQ', [
+                'message_id' => $eventId,
+                'subject' => $msg->subject,
+            ]);
             $this->dlq->moveToDlq(
                 $msg,
                 (string) config('nats_orders.subjects.payments_dlq', 'payments.dlq'),
                 $consumer,
                 'Invalid order_id in envelope',
-                1,
+                $attempt,
             );
 
             return;
         }
 
-        if (Payment::query()->where('order_id', $orderId)->where('status', 'completed')->exists()) {
-            Log::info('order_pipeline.payment.duplicate_skip', ['order_id' => $orderId, 'event_id' => $eventId]);
+        $processedKey = 'payment_evt_processed:'.$eventId;
+        if (Cache::has($processedKey)) {
+            PipelineLog::info('PaymentService', 'Already processed (idempotency) — ACK', [
+                'message_id' => $eventId,
+                'order_id' => $orderId,
+            ]);
             $msg->ack();
 
             return;
         }
 
-        $attemptKey = 'order_pay_attempt:'.$eventId;
-        $n = Cache::increment($attemptKey);
-        if ($n === false) {
-            Cache::put($attemptKey, 1, 7200);
-            $n = 1;
+        if (Payment::query()->where('order_id', $orderId)->where('status', 'completed')->exists()) {
+            PipelineLog::info('PaymentService', 'Duplicate delivery; completed payment exists — ACK', [
+                'message_id' => $eventId,
+                'order_id' => $orderId,
+            ]);
+            Cache::put($processedKey, true, $ttl);
+            $msg->ack();
+
+            return;
         }
 
-        $maxAttempts = (int) config('nats_orders.max_processing_attempts_before_dlq', 5);
         $transientPct = (int) config('nats_orders.payment_transient_fail_percent', 35);
         $terminalPct = (int) config('nats_orders.payment_terminal_fail_percent', 10);
 
-        Log::info('order_pipeline.payment.received', [
+        PipelineLog::info('PaymentService', 'Processing started', [
+            'message_id' => $eventId,
             'order_id' => $orderId,
-            'event_id' => $eventId,
-            'delivery_attempt' => $n,
+            'jetstream_attempt' => $attempt,
         ]);
-
-        if ($n > $maxAttempts) {
-            $this->dlq->moveToDlq(
-                $msg,
-                (string) config('nats_orders.subjects.payments_dlq', 'payments.dlq'),
-                $consumer,
-                'Exceeded max processing attempts (payment worker)',
-                $n,
-            );
-            Cache::forget($attemptKey);
-
-            return;
-        }
 
         $roll = random_int(1, 100);
 
-        if ($roll <= $transientPct && $n < $maxAttempts) {
-            Log::warning('order_pipeline.payment.transient_nack', [
-                'order_id' => $orderId,
-                'event_id' => $eventId,
-                'attempt' => $n,
-            ]);
-            $msg->nack(1.5);
+        if ($roll <= $transientPct) {
+            if ($attempt >= $maxDeliver) {
+                PipelineLog::warning('PaymentService', 'Simulated transient failure but max JetStream deliveries reached → DLQ', [
+                    'message_id' => $eventId,
+                    'order_id' => $orderId,
+                    'jetstream_attempt' => $attempt,
+                    'max_deliver' => $maxDeliver,
+                ]);
+                $this->dlq->moveToDlq(
+                    $msg,
+                    (string) config('nats_orders.subjects.payments_dlq', 'payments.dlq'),
+                    $consumer,
+                    'Simulated transient failure after max_deliver JetStream deliveries',
+                    $attempt,
+                );
 
-            return;
+                return;
+            }
+
+            PipelineLog::warning('PaymentService', "Payment failed → retry {$attempt}/{$maxDeliver} (JetStream NAK)", [
+                'message_id' => $eventId,
+                'subject' => $msg->subject,
+                'order_id' => $orderId,
+                'jetstream_attempt' => $attempt,
+            ]);
+            throw new TransientPipelineException('simulated_transient_payment_failure');
         }
 
         $amountCents = (int) ($data['total_cents'] ?? 0);
 
-        if ($roll <= $transientPct + $terminalPct || $n >= $maxAttempts) {
+        if ($roll <= $transientPct + $terminalPct) {
+            PipelineLog::warning('PaymentService', 'Terminal decline (simulated) — publishing payments.failed', [
+                'message_id' => $eventId,
+                'order_id' => $orderId,
+            ]);
             DB::transaction(function () use ($orderId, $amountCents, $data, $stream): void {
                 Payment::query()->create([
                     'order_id' => $orderId,
@@ -105,10 +139,10 @@ final class PaymentService
                     $stream,
                     (string) config('nats_orders.subjects.payments_failed', 'payments.failed'),
                     [
-                        'idempotency_key' => 'pay-fail-'.$orderId.'-'.$data['order_uuid'],
+                        'idempotency_key' => 'pay-fail-'.$orderId.'-'.($data['order_uuid'] ?? ''),
                         'order_id' => $orderId,
                         'order_uuid' => $data['order_uuid'] ?? null,
-                        'reason' => 'simulated_decline_or_max_attempts',
+                        'reason' => 'simulated_decline',
                         'amount_cents' => $amountCents,
                     ],
                     useEnvelope: true,
@@ -116,9 +150,12 @@ final class PaymentService
                 );
             });
 
-            Log::info('order_pipeline.payment.failed_published', ['order_id' => $orderId, 'event_id' => $eventId]);
+            Cache::put($processedKey, true, $ttl);
+            PipelineLog::info('PaymentService', 'Successfully processed (declined path)', [
+                'message_id' => $eventId,
+                'order_id' => $orderId,
+            ]);
             $msg->ack();
-            Cache::forget($attemptKey);
 
             return;
         }
@@ -150,8 +187,11 @@ final class PaymentService
             );
         });
 
-        Log::info('order_pipeline.payment.completed_published', ['order_id' => $orderId, 'event_id' => $eventId]);
+        Cache::put($processedKey, true, $ttl);
+        PipelineLog::info('PaymentService', 'Successfully processed (payment completed)', [
+            'message_id' => $eventId,
+            'order_id' => $orderId,
+        ]);
         $msg->ack();
-        Cache::forget($attemptKey);
     }
 }
