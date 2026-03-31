@@ -2,13 +2,14 @@
 
 namespace App\Services\Nats;
 
+use App\Logging\PipelineLog;
 use App\Models\FailedMessage;
 use Basis\Nats\Message\Msg;
 use Illuminate\Support\Facades\Log;
 use LaravelNats\Laravel\Facades\NatsV2;
 
 /**
- * Terminal handling: publish to *.dlq stream subject + persist audit row.
+ * After JetStream max_deliver is exhausted (or poison message): TERM + publish audit to *.dlq + DB row for replay.
  */
 final class OrderJetStreamDlq
 {
@@ -25,12 +26,12 @@ final class OrderJetStreamDlq
             $payload = ['raw' => $raw];
         }
 
+        $sourceSubject = $msg->subject !== '' ? $msg->subject : null;
+
         FailedMessage::create([
             'subject' => $dlqSubject,
-            'payload' => array_merge($payload, [
-                'dlq_reason' => $reason,
-                'source_consumer' => $consumerName,
-            ]),
+            'source_subject' => $sourceSubject,
+            'payload' => $payload,
             'error_message' => $reason,
             'error_reason' => $reason,
             'attempts' => $attempts,
@@ -46,6 +47,7 @@ final class OrderJetStreamDlq
                 $dlqSubject,
                 [
                     'source_consumer' => $consumerName,
+                    'source_subject' => $sourceSubject,
                     'failure_message' => $reason,
                     'attempts' => $attempts,
                     'original_envelope' => $payload,
@@ -60,11 +62,13 @@ final class OrderJetStreamDlq
             ]);
         }
 
-        Log::error('order_pipeline.dlq', [
-            'subject' => $dlqSubject,
+        PipelineLog::error('Dlq', 'Moved to DLQ after max retries or terminal poison', [
+            'dlq_subject' => $dlqSubject,
+            'source_subject' => $sourceSubject,
             'consumer' => $consumerName,
             'reason' => $reason,
             'attempts' => $attempts,
+            'message_id' => $payload['id'] ?? null,
         ]);
 
         if ($msg->replyTo !== null && $msg->replyTo !== '') {
