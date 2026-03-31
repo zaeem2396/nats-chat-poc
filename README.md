@@ -58,11 +58,56 @@ All inter-service traffic is **JetStream** (persisted, replayable), not Laravel 
             [Inventory worker] --ACK--> publish inventory.updated
 
 DLQ path (payments example):
-  Max app-level attempts exceeded or poison message
+  Business logic gives up after JetStream deliveries exhausted (or poison message)
     --> term() on JetStream msg
     --> publish wrapped payload to payments.dlq (still under ORDERS stream)
-    --> insert row in failed_messages
+    --> insert row in failed_messages (payload = original envelope; source_subject for replay)
 ```
+
+---
+
+## Failure Handling & Reliability
+
+### How JetStream retries work
+
+1. **Durable consumers** are created with **explicit ACK** (`AckPolicy::EXPLICIT`), **`ack_wait`**, and **`max_deliver`** — see `config/nats_orders.php` and `App\Services\Nats\OrderStreamConsumerProvisioner` (the code applies these fields when the consumer is first created).
+2. **Success** → handler calls **`ack()`**; the message leaves the consumer’s pending set.
+3. **Transient failure** (e.g. simulated PSP outage) → handler throws `TransientPipelineException` (payments) or **`nack(delay)`** (inventory stock race). The server **redelivers** the message after the NAK delay or after **`ack_wait`** if the message was never acked.
+4. **Delivery attempt** is derived from the JetStream **`$JS.ACK...` reply subject** (see `App\Support\JetStreamAckMeta::deliveryAttempt`) and logged as `jetstream_attempt` together with **`message_id`** (envelope `id`) and **`subject`**.
+
+There is **no parallel “app retry counter”** for payments: **JetStream’s `max_deliver`** is the source of truth. When `jetstream_attempt >= max_deliver` and the handler would still fail, the message is **moved to DLQ** instead of spinning forever.
+
+### How the DLQ works
+
+- **`OrderJetStreamDlq::moveToDlq()`** persists a row in **`failed_messages`** with:
+  - **`payload`**: the **original** JSON envelope (not merged with DLQ metadata — clean replay).
+  - **`source_subject`**: the JetStream message subject (e.g. `orders.created`) for **replay**.
+  - **`subject`**: DLQ audit subject (e.g. `payments.dlq`).
+  - **`attempts`**, **`error_message`**, **`failed_at`**.
+- A second publish to **`*.dlq`** on the same stream keeps **broker-level** visibility for operators.
+
+### Replaying failed messages
+
+```bash
+php artisan nats:dlq:replay --dry-run
+php artisan nats:dlq:replay --limit=10
+php artisan nats:dlq:replay --id=12 --id=13
+```
+
+Replay uses **`source_subject`** + **`payload`** with **`useEnvelope: false`** so the wire body matches the original envelope. **Idempotency** (envelope `id` + DB/cache) prevents duplicate side effects when consumers are correct.
+
+### Example failure flow (payments worker)
+
+1. **`[PaymentService] Message received`** — `message_id`, `subject`, `jetstream_attempt`, `jetstream_max_deliver`.
+2. Random **transient** branch → **`[PaymentService] Payment failed → retry N/M (JetStream NAK)`** then **`[PaymentConsumer] Transient failure — NAK for JetStream redelivery`**.
+3. After several redeliveries, either **success** (`Successfully processed`) or **`[PaymentService] Simulated transient failure but max JetStream deliveries reached → DLQ`**.
+4. **`[Dlq] Moved to DLQ after max retries or terminal poison`** with **`message_id`** and **`source_subject`**.
+
+Watch: `docker compose logs -f payments-worker`.
+
+### Changing retry tuning
+
+Edit **`NATS_CONSUMER_ACK_WAIT`**, **`NATS_CONSUMER_MAX_DELIVER`**, or per-consumer env keys in `.env`. **Existing** JetStream consumers are **not** auto-updated (provisioner skips if the durable already exists). For a PoC, delete the consumer in NATS or bump the durable name in config, then restart workers.
 
 ---
 
@@ -97,7 +142,8 @@ DLQ path (payments example):
 Environment highlights (see `.env.example`):
 
 - `NATS_HOST`, `NATS_PORT` — broker for **NatsV2** / JetStream.
-- `NATS_ORDER_MAX_ATTEMPTS` — app-level payment attempts before DLQ.
+- `NATS_CONSUMER_ACK_WAIT`, `NATS_CONSUMER_MAX_DELIVER` — JetStream consumer **ack_wait** / **max_deliver** (and per-consumer overrides).
+- `NATS_NACK_DELAY_SECONDS` — delay passed to **`nack()`** on transient paths.
 - `NATS_PAYMENT_TRANSIENT_FAIL_PERCENT`, `NATS_PAYMENT_TERMINAL_FAIL_PERCENT` — simulation knobs.
 
 ---
@@ -162,9 +208,12 @@ docker compose exec app php artisan nats:v2:jetstream:streams
 
 ```
 app/Consumers/          # JetStream pull handlers (ACK/NACK/term)
+app/Exceptions/         # TransientPipelineException (NAK / JetStream retry)
+app/Logging/            # PipelineLog — [Component] prefixed structured lines
 app/Services/           # OrderService, PaymentService, InventoryService, NotificationService
-app/Services/Nats/      # Provisioner, worker loop, DLQ helper
-app/Support/            # OrderPipelineEventParser
+app/Services/Nats/      # Provisioner (ack_wait, max_deliver), worker loop, DLQ helper
+app/Support/            # OrderPipelineEventParser, JetStreamAckMeta (delivery attempt from $JS.ACK)
+app/Console/Commands/   # Workers + nats:dlq:replay
 config/nats_orders.php
 ```
 
