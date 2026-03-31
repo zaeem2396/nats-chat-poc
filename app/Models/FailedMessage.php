@@ -8,6 +8,7 @@ class FailedMessage extends Model
 {
     protected $fillable = [
         'subject',
+        'source_subject',
         'payload',
         'error_message',
         'error_reason',
