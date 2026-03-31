@@ -31,22 +31,30 @@ class DlqApiTest extends TestCase
     public function test_can_list_dlq_with_messages(): void
     {
         FailedMessage::create([
-            'subject' => 'chat.dlq',
-            'payload' => ['room_id' => 1, 'content' => 'test', 'failure_message' => 'Something failed'],
-            'error_message' => 'Something failed',
-            'error_reason' => 'Something failed',
-            'attempts' => 3,
-            'original_queue' => 'default',
-            'original_connection' => 'nats',
+            'subject' => 'payments.dlq',
+            'source_subject' => 'orders.created',
+            'payload' => [
+                'id' => 'evt_test_1',
+                'type' => 'orders.created',
+                'version' => 'v1',
+                'data' => ['order_id' => 99],
+            ],
+            'error_message' => 'Exceeded max_deliver',
+            'error_reason' => 'Exceeded max_deliver',
+            'attempts' => 5,
+            'original_queue' => 'svc_payments_order_created',
+            'original_connection' => 'jetstream',
             'failed_at' => now(),
         ]);
 
         $response = $this->getJson('/api/dlq');
 
         $response->assertStatus(200)
-            ->assertJsonPath('data.0.subject', 'chat.dlq')
-            ->assertJsonPath('data.0.error_message', 'Something failed')
-            ->assertJsonPath('data.0.attempts', 3)
-            ->assertJsonPath('data.0.payload.room_id', 1);
+            ->assertJsonPath('data.0.subject', 'payments.dlq')
+            ->assertJsonPath('data.0.source_subject', 'orders.created')
+            ->assertJsonPath('data.0.error_message', 'Exceeded max_deliver')
+            ->assertJsonPath('data.0.attempts', 5)
+            ->assertJsonPath('data.0.payload.id', 'evt_test_1')
+            ->assertJsonPath('data.0.payload.data.order_id', 99);
     }
 }
